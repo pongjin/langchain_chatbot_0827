@@ -718,7 +718,7 @@ def main():
             with open(temp_path, "wb") as f:
                 f.write(uploaded_file.getbuffer())
         
-            rag_chain = initialize_components(temp_path, option)
+            rag_chain = initialize_components(temp_path, "gpt-4o-mini")
             chat_history = StreamlitChatMessageHistory(key="chat_messages_user")
         
             conversational_rag_chain = RunnableWithMessageHistory(
