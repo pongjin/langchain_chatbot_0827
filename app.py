@@ -96,7 +96,7 @@ class STEmbedding(Embeddings):
 def get_embedder():
     """임베딩 모델 가져오기"""
     try:
-        return STEmbedding("dragonkue/snowflake-arctic-embed-l-v2.0-ko")
+        return STEmbedding("all-MiniLM-L6-v2")  #dragonkue/snowflake-arctic-embed-l-v2.0-ko
     except Exception as e:
         st.warning(f"기본 임베딩 모델 로드 실패: {str(e)}")
         try:
