@@ -716,7 +716,7 @@ def main():
                         f.write(uploaded_file.getbuffer())
 
                     df2 = pd.read_csv(temp_path)
-                    print(len(df2))
+                    st.dataframe(df2)
                     
                     with st.spinner("RAG 시스템 초기화 중..."):
                         rag_chain = initialize_rag_components(temp_path, "gpt-4o-mini")
