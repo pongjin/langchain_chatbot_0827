@@ -767,7 +767,7 @@ def main():
                                                 st.markdown(f"👤 {source}")
                                                 st.markdown(doc.page_content[:200] + "...")
                     else:
-                        st.error("RAG 시스템 초기화에 실패했습니다. user_id와 answer 컬럼을 확인해주세요.")
+                        st.error("RAG 시스템 초기화에 실패했습니다.")
 
                 elif 'OPENAI_API_KEY' not in st.secrets:
                     st.warning("OpenAI API 키가 설정되지 않았습니다. Streamlit secrets에 OPENAI_API_KEY를 추가해주세요.")
