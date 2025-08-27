@@ -717,6 +717,7 @@ def main():
                     
                     with st.spinner("RAG 시스템 초기화 중..."):
                         rag_chain = initialize_rag_components(temp_path, "gpt-4o-mini")
+                    st.dataframe(pd.read_csv(temp_path)
                     
                     if rag_chain:
                         chat_history = StreamlitChatMessageHistory(key="chat_messages_user")
