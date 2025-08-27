@@ -64,7 +64,7 @@ def get_embedder():
             with st.spinner(f"🤖 임베딩 모델을 로드하는 중입니다... ({model_name})"):
                 try:
                     self.model = SentenceTransformer(model_name)
-                    st.success(f"✅ 임베딩 모델 로드 성공: {model_name}")
+                    #st.success(f"✅ 임베딩 모델 로드 성공: {model_name}")
                 except Exception as e:
                     st.error(f"❌ 임베딩 모델 로드 실패: {str(e)}")
                     raise e
@@ -713,7 +713,7 @@ def main():
                         filtered_df = df[df.total_cl != 99]
                         st.metric("유효 응답", len(filtered_df))
                     with col3:
-                        st.metric("총 응답자", df.user_id.nunique())
+                        st.metric("총 유효 응답자", df.user_id.nunique())
                     
                     # Summary Table
                     st.subheader("📋 Summary Table")
