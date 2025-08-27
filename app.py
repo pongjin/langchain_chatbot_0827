@@ -571,7 +571,7 @@ def get_embedder():
 def create_vector_store(file_path: str):
     docs = load_csv_and_create_docs(file_path)
     if not docs:
-        st.dataframe(df2)
+        st.title("여기 오류임")
         return None
         
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=0)
