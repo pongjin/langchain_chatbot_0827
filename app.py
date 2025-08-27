@@ -42,7 +42,7 @@ os.environ["OPENAI_API_KEY"] = st.secrets['OPENAI_API_KEY']
 
 # ✅ CSV 로딩 → 유저 단위로 문서 생성
 @st.cache_resource
-def load_csv_and_create_docs(file_path: str):
+def load_csv_and_create_docs(file_path: str, cache_buster: str):
     df = pd.read_csv(file_path)
 
     if 'user_id' not in df.columns or 'SPLITTED' not in df.columns:
@@ -81,12 +81,13 @@ def get_embedder():
 
 # ✅ 벡터스토어 생성
 @st.cache_resource
-def create_vector_store(file_path: str):
-    docs = load_csv_and_create_docs(file_path)
+def create_vector_store(file_path: str, cache_buster: str):
+    docs = load_csv_and_create_docs(file_path, cache_buster)
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=0)
     split_docs = text_splitter.split_documents(docs)
 
     file_hash = os.path.splitext(os.path.basename(file_path))[0]
+    collection_name = f"coll_{file_hash}"
     persist_dir = f"./chroma_db_user/{file_hash}"
     if os.path.exists(persist_dir):
         shutil.rmtree(persist_dir)
@@ -95,14 +96,15 @@ def create_vector_store(file_path: str):
     vectorstore = Chroma.from_documents(
         split_docs,
         embeddings,
+        collection_name=collection_name,
         persist_directory=persist_dir
     )
     return vectorstore
 
 # ✅ RAG 체인 초기화
 @st.cache_resource
-def initialize_components(file_path: str, selected_model: str):
-    vectorstore = create_vector_store(file_path)
+def initialize_components(file_path: str, selected_model: str, cache_buster: str):
+    vectorstore = create_vector_store(file_path, cache_buster)
     retriever = vectorstore.as_retriever( search_type="similarity",search_kwargs={"k": 10} )
 
     contextualize_q_prompt = ChatPromptTemplate.from_messages([
@@ -724,7 +726,7 @@ def main():
                 with open(temp_path, "wb") as f:
                     f.write(uploaded_file.getbuffer())
             
-                rag_chain = initialize_components(temp_path, "gpt-4o-mini")
+                rag_chain = initialize_components(temp_path, "gpt-4o-mini", cache_buster=file_hash)
                 chat_history = StreamlitChatMessageHistory(key="chat_messages_user")
             
                 conversational_rag_chain = RunnableWithMessageHistory(
