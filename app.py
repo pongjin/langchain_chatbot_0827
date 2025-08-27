@@ -716,7 +716,7 @@ def main():
                         filtered_df = df[df.total_cl != 99]
                         st.metric("유효 응답(주제 단위 분리)", len(filtered_df))
                     with col3:
-                        st.metric("총 유효 응답자수", df.user_id.nunique())
+                        st.metric("총 유효 응답자수", df[df.total_cl != 99].user_id.nunique())
 
                     # Summary Table
                     st.subheader("📋 Summary Table")
@@ -804,7 +804,7 @@ def main():
                                 with st.expander("참고 문서 확인"):
                                     for doc in response['context']:
                                         source = doc.metadata.get('source', '알 수 없음')
-                                        raw_ans = doc.metadata.get('highlighted_ans', '알 수 없음')
+                                        raw_ans = doc.metadata.get('ans', '알 수 없음')
                                         source_filename = os.path.basename(source)
                                         st.markdown(f"👤 {source_filename}")
                                         st.markdown(doc.page_content)
