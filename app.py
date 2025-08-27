@@ -105,7 +105,7 @@ def create_vector_store(file_path: str, cache_buster: str):
         split_docs,
         embeddings,
         collection_name=collection_name,
-        persist_directory=persist_dir,
+        persist_directory=None,
     )
     return vectorstore
 
