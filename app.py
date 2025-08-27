@@ -725,15 +725,27 @@ def main():
                     )
     
                 file_hash = get_file_hash(uploaded_file)
-                temp_dir = tempfile.gettempdir()
-                temp_path = os.path.join(temp_dir, f"{file_hash}.csv")
-    
-                with open(temp_path, "wb") as f:
-                    f.write(uploaded_file.getbuffer())
-            
-                rag_chain = initialize_components(temp_path, "gpt-4o-mini", cache_buster=file_hash)
-                chat_history = StreamlitChatMessageHistory(key="chat_messages_user")
-            
+
+                # 세션 상태 초기화
+                if "chat_session_nonce" not in st.session_state:
+                    st.session_state["chat_session_nonce"] = 0
+                
+                # 파일이 바뀌면 히스토리 초기화
+                if st.session_state.get("last_file_hash") != file_hash:
+                    # 기존 히스토리 키가 있으면 제거
+                    old_key = st.session_state.get("chat_history_key")
+                    if old_key and old_key in st.session_state:
+                        del st.session_state[old_key]
+                    st.session_state["last_file_hash"] = file_hash
+                    st.session_state["chat_session_nonce"] = 0  # 파일 바뀌면 nonce 초기화
+                
+                # 현재 세션 식별자(파일 해시 + nonce)
+                chat_session_id = f"{file_hash}-{st.session_state['chat_session_nonce']}"
+                chat_history_key = f"chat_messages_{chat_session_id}"
+                
+                # 이 값을 저장해두면 다음 턴에서 접근 가능
+                st.session_state["chat_history_key"] = chat_history_key
+               
                 conversational_rag_chain = RunnableWithMessageHistory(
                     rag_chain,
                     lambda session_id: chat_history,
@@ -741,7 +753,40 @@ def main():
                     history_messages_key="history",
                     output_messages_key="answer",
                 )
+                
+                temp_dir = tempfile.gettempdir()
+                temp_path = os.path.join(temp_dir, f"{file_hash}.csv")
+    
+                with open(temp_path, "wb") as f:
+                    f.write(uploaded_file.getbuffer())
             
+                rag_chain = initialize_components(temp_path, "gpt-4o-mini", cache_buster=file_hash)
+                chat_history = StreamlitChatMessageHistory(key=chat_history_key) #StreamlitChatMessageHistory(key="chat_messages_user")
+                config = {"configurable": {"session_id": chat_session_id}}
+
+                conversational_rag_chain = RunnableWithMessageHistory(
+                    rag_chain,
+                    lambda session_id: chat_history,
+                    input_messages_key="input",
+                    history_messages_key="history",
+                    output_messages_key="answer",
+                )
+
+                # ✅ 채팅 초기화/새 세션 시작 버튼
+                btn_col1, btn_col2 = st.columns([1, 1])
+                with btn_col1:
+                    if st.button("채팅 히스토리 지우기", use_container_width=True):
+                        chat_history.clear()  # 현재 세션의 메시지 비움
+                        st.rerun()
+                
+                with btn_col2:
+                    if st.button("새 채팅 시작", use_container_width=True):
+                        st.session_state["chat_session_nonce"] += 1  # 새 세션
+                        # 메모리에 남아있는 현재 키 정리(선택)
+                        if chat_history_key in st.session_state:
+                            del st.session_state[chat_history_key]
+                        st.rerun()
+
                 if len(chat_history.messages) == 0:
                     chat_history.add_ai_message("업로드된 유저 응답 기반으로 무엇이든 물어보세요! 🤗")
             
@@ -752,7 +797,6 @@ def main():
                     st.chat_message("human").write(prompt_message)
                     with st.chat_message("ai"):
                         with st.spinner("생각 중입니다..."):
-                            config = {"configurable": {"session_id": "user_session"}}
                             response = conversational_rag_chain.invoke(
                                 {"input": prompt_message},
                                 config,
@@ -817,7 +861,7 @@ def main():
                 * 두 기능을 모두 사용하려면 모든 컬럼이 필요합니다
                 """)
                 
-if st.button("🔄 캐시/벡터DB 초기화"):
+if st.button("🔄 캐시/벡터DB 초기화(리셋버튼..!)"):
     st.cache_resource.clear()
     shutil.rmtree(os.path.join(tempfile.gettempdir(), "chroma_db_user"), ignore_errors=True)
     st.success("초기화 완료")
