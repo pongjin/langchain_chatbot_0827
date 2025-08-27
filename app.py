@@ -893,12 +893,5 @@ if st.button("🔄 캐시/벡터DB 초기화(리셋버튼..!)"):
     st.success("초기화 완료")
     st.rerun()
 
-# 파일 변경 감지
-if st.session_state.get("last_file_hash") != file_hash:
-    st.cache_resource.clear()
-    shutil.rmtree(PERSIST_ROOT, ignore_errors=True)
-    ...
-    st.rerun()
-
 if __name__ == "__main__":
     main()
