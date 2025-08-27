@@ -22,25 +22,9 @@ from langchain_core.runnables import RunnableMap
 from sentence_transformers import SentenceTransformer
 from langchain_core.embeddings import Embeddings
 
-import chromadb
-from langchain_chroma import Chroma
-from chromadb.config import Settings
 
 import hashlib
 import shutil
-
-# 1) Settings "고정" (이 값 절대 바꾸지 않기!)
-CHROMA_SETTINGS = Settings(
-    # 이전에 기본값으로 생성했다면 아래 줄을 주석 처리하거나 True로 맞추세요.
-    # anonymized_telemetry=True,  # 기본값과 동일하게 유지 권장
-    allow_reset=True,
-    chroma_db_impl="duckdb+parquet",  # 백엔드 명시(권장)
-)
-
-@st.cache_resource
-def get_chroma_client(persist_dir: str):
-    # 같은 persist_dir에 대해 "항상" 같은 Settings로 생성됨
-    return chromadb.PersistentClient(path=persist_dir, settings=CHROMA_SETTINGS)
 
 # ✅ 파일 해시 생성
 def get_file_hash(uploaded_file):
@@ -52,6 +36,8 @@ def get_file_hash(uploaded_file):
 __import__('pysqlite3')
 import sys
 sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
+
+from langchain_chroma import Chroma
 os.environ["OPENAI_API_KEY"] = st.secrets['OPENAI_API_KEY']
 
 # ✅ CSV 로딩 → 유저 단위로 문서 생성
@@ -100,44 +86,28 @@ def get_embedder():
 # ✅ 벡터스토어 생성
 @st.cache_resource
 def create_vector_store(file_path: str, cache_buster: str):
-    # 문서 준비
     docs = load_csv_and_create_docs(file_path, cache_buster)
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=0)
     split_docs = text_splitter.split_documents(docs)
 
-    # 경로 구성
     file_hash = os.path.splitext(os.path.basename(file_path))[0]
     collection_name = f"coll_{file_hash}"
-    persist_root = os.path.join(tempfile.gettempdir(), "chroma_db_user")  # ← 루트는 고정
-    os.makedirs(persist_root, exist_ok=True)
 
-    # 클라이언트는 "루트" 경로로 (컬렉션은 이름으로 분리)
-    client = get_chroma_client(persist_root)
+    # ✅ 쓰기 가능한 루트 (예: /tmp)
+    persist_root = os.path.join(tempfile.gettempdir(), "chroma_db_user")
+    persist_dir = os.path.join(persist_root, collection_name)
+
+    # 폴더 깨끗하게 재생성
+    shutil.rmtree(persist_dir, ignore_errors=True)
+    os.makedirs(persist_dir, exist_ok=True)  # ✅ 부모/자식 모두 보장
 
     embeddings = get_embedder()
-
-    # from_documents 대신 빈 컬렉션 후 add_documents
-    vectorstore = Chroma(
-        client=client,
+    vectorstore = Chroma.from_documents(
+        split_docs,
+        embeddings,
         collection_name=collection_name,
-        embedding_function=embeddings,
+        persist_directory=persist_dir,
     )
-
-    # 컬렉션을 깔끔히 새로 쓰고 싶다면(선택): reset 후 add
-    try:
-        # 존재하면 비우기
-        vectorstore.delete_collection()  # langchain-chroma 0.1.2+ 에서 지원
-        vectorstore = Chroma(
-            client=client,
-            collection_name=collection_name,
-            embedding_function=embeddings,
-        )
-    except Exception:
-        pass
-
-    if split_docs:
-        vectorstore.add_documents(split_docs)
-
     return vectorstore
 
 # ✅ RAG 체인 초기화
