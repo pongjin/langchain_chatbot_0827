@@ -643,7 +643,7 @@ def main():
             has_mindmap_columns = all(col in df.columns for col in mindmap_columns)
             
             
-            if not has_mindmap_column:
+            if not has_mindmap_columns:
                 st.error("마인드맵 또는 RAG 기능을 위한 필수 컬럼이 없습니다.")
                 st.info("user_id, total_cl, summary, keywords, SPLITTED")
                 st.stop()
