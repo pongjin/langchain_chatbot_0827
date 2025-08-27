@@ -22,6 +22,7 @@ from langchain_core.runnables import RunnableMap
 from sentence_transformers import SentenceTransformer
 from langchain_core.embeddings import Embeddings
 
+import chromadb
 from langchain_chroma import Chroma
 from chromadb.config import Settings
 
