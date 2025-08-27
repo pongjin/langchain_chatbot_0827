@@ -679,7 +679,7 @@ def main():
                 tree_data = create_tree_data_from_csv(df)
 
                 with left_col:
-                    st.subheader("🗺️ 인터랙티브 마인드맵")
+                    st.subheader("🗺️ 키워드 마인드맵")
                     st.markdown("*노드를 클릭하여 펼치기/접기*")
 
                     # 계층형 마인드맵 시각화 - 동적 높이 적용
@@ -745,14 +745,6 @@ def main():
                 
                 # 이 값을 저장해두면 다음 턴에서 접근 가능
                 st.session_state["chat_history_key"] = chat_history_key
-               
-                conversational_rag_chain = RunnableWithMessageHistory(
-                    rag_chain,
-                    lambda session_id: chat_history,
-                    input_messages_key="input",
-                    history_messages_key="history",
-                    output_messages_key="answer",
-                )
                 
                 temp_dir = tempfile.gettempdir()
                 temp_path = os.path.join(temp_dir, f"{file_hash}.csv")
