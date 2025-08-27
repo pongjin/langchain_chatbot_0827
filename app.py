@@ -884,7 +884,3 @@ if st.button("🔄 캐시/벡터DB 초기화(리셋버튼..!)"):
 
 if __name__ == "__main__":
     main()
-
-RAG 초기화 중 오류가 발생했습니다: Database error: error returned from database: (code: 1) no such table: tenants
-
-에러 발생 이유
