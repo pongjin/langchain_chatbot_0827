@@ -88,16 +88,21 @@ def create_vector_store(file_path: str, cache_buster: str):
 
     file_hash = os.path.splitext(os.path.basename(file_path))[0]
     collection_name = f"coll_{file_hash}"
-    persist_dir = f"./chroma_db_user/{file_hash}"
-    if os.path.exists(persist_dir):
-        shutil.rmtree(persist_dir)
 
-    embeddings = get_embedder()  # ← 여기만 교체
+    # ✅ 쓰기 가능한 루트 (예: /tmp)
+    persist_root = os.path.join(tempfile.gettempdir(), "chroma_db_user")
+    persist_dir = os.path.join(persist_root, collection_name)
+
+    # 폴더 깨끗하게 재생성
+    shutil.rmtree(persist_dir, ignore_errors=True)
+    os.makedirs(persist_dir, exist_ok=True)  # ✅ 부모/자식 모두 보장
+
+    embeddings = get_embedder()
     vectorstore = Chroma.from_documents(
         split_docs,
         embeddings,
         collection_name=collection_name,
-        persist_directory=persist_dir
+        persist_directory=persist_dir,
     )
     return vectorstore
 
@@ -811,6 +816,11 @@ def main():
                 * total_cl != 99 인 데이터만 마인드맵에 사용됩니다
                 * 두 기능을 모두 사용하려면 모든 컬럼이 필요합니다
                 """)
+                
+if st.button("🔄 캐시/벡터DB 초기화"):
+    st.cache_resource.clear()
+    shutil.rmtree(os.path.join(tempfile.gettempdir(), "chroma_db_user"), ignore_errors=True)
+    st.success("초기화 완료")
 
 if __name__ == "__main__":
     main()
