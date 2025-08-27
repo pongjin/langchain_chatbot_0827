@@ -579,15 +579,20 @@ def create_vector_store(file_path: str):
     file_hash = os.path.splitext(os.path.basename(file_path))[0]
     persist_dir = f"./chroma_db_user/{file_hash}"
     if os.path.exists(persist_dir):
-        shutil.rmtree(persist_dir)
+        shutil.rmtree(persist_dir, ignore_errors=True)
     st.title("여기 오류임3")
     embeddings = get_embedder()
-    vectorstore = Chroma.from_documents(
-        split_docs,
-        embeddings,
-        persist_directory=persist_dir
-    )
-    return vectorstore
+    try:
+        vectorstore = Chroma.from_documents(
+            split_docs,
+            embeddings,
+            persist_directory=persist_dir
+        )
+        return vectorstore
+    except Exception as e:
+        st.error(f"Chroma 생성 중 오류: {str(e)}")
+        return None
+    
 
 @st.cache_resource
 def initialize_rag_components(file_path: str, selected_model: str):
