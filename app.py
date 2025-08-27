@@ -28,6 +28,14 @@ from chromadb.config import Settings
 import hashlib
 import shutil
 
+PERSIST_ROOT = os.path.join(tempfile.gettempdir(), "chroma_db_user")
+CLIENT_SETTINGS = Settings(
+    anonymized_telemetry=False,
+    is_persistent=True,
+    chroma_db_impl="duckdb+parquet",   # sqlite 계속 쓰려면 "sqlite"
+    persist_directory=PERSIST_ROOT,
+)
+
 # ✅ 파일 해시 생성
 def get_file_hash(uploaded_file):
     file_content = uploaded_file.read()
@@ -87,7 +95,7 @@ def get_embedder():
     return STEmbedding("dragonkue/snowflake-arctic-embed-l-v2.0-ko")  #dragonkue/snowflake-arctic-embed-l-v2.0-ko "all-MiniLM-L6-v2"
 
 # ✅ 벡터스토어 생성
-@st.cache_resource
+# @st.cache_resource  <-- 제거 권장
 def create_vector_store(file_path: str, cache_buster: str):
     docs = load_csv_and_create_docs(file_path, cache_buster)
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=0)
@@ -96,35 +104,23 @@ def create_vector_store(file_path: str, cache_buster: str):
     file_hash = os.path.splitext(os.path.basename(file_path))[0]
     collection_name = f"coll_{file_hash}"
 
-    # ✅ 쓰기 가능한 루트 (예: /tmp)
-    persist_root = os.path.join(tempfile.gettempdir(), "chroma_db_user")
-    persist_dir = os.path.join(persist_root, collection_name)
-
-    # 폴더 깨끗하게 재생성
-    shutil.rmtree(persist_dir, ignore_errors=True)
-    os.makedirs(persist_dir, exist_ok=True)  # ✅ 부모/자식 모두 보장
-
     embeddings = get_embedder()
 
-    # 👇👇 여기에 추가 (Settings + sqlite 명시)
-    client_settings = Settings(
-        anonymized_telemetry=False,
-        is_persistent=True,
-        chroma_db_impl="sqlite",      # duckdb+parquet 권장 시 "duckdb+parquet"로 교체
-        persist_directory=persist_dir,
-    )
-    
+    # 폴더를 새로 만들 필요 없음(최상위만 사용)
+    os.makedirs(PERSIST_ROOT, exist_ok=True)
+
+    # 기존과 동일 Settings/경로로 항상 생성(단일화)
     vectorstore = Chroma.from_documents(
         split_docs,
         embeddings,
         collection_name=collection_name,
-        persist_directory=persist_dir,
-        client_settings=client_settings,   # 👈 반드시 전달
+        persist_directory=PERSIST_ROOT,
+        client_settings=CLIENT_SETTINGS,
     )
     return vectorstore
 
 # ✅ RAG 체인 초기화
-@st.cache_resource
+#@st.cache_resource
 def initialize_components(file_path: str, selected_model: str, cache_buster: str):
     vectorstore = create_vector_store(file_path, cache_buster)
     retriever = vectorstore.as_retriever( search_type="similarity",search_kwargs={"k": 10} )
@@ -890,12 +886,19 @@ def main():
                 * 두 기능을 모두 사용하려면 모든 컬럼이 필요합니다
                 """)
                 
+# 리셋 버튼
 if st.button("🔄 캐시/벡터DB 초기화(리셋버튼..!)"):
     st.cache_resource.clear()
-    persist_root = os.path.join(tempfile.gettempdir(), "chroma_db_user")
-    shutil.rmtree(persist_root, ignore_errors=True)   # ← 루트 전체 삭제
+    shutil.rmtree(PERSIST_ROOT, ignore_errors=True)
     st.success("초기화 완료")
-    st.rerun()  # ← 중요: 바로 재실행해 이전 핸들 끊기
+    st.rerun()
+
+# 파일 변경 감지
+if st.session_state.get("last_file_hash") != file_hash:
+    st.cache_resource.clear()
+    shutil.rmtree(PERSIST_ROOT, ignore_errors=True)
+    ...
+    st.rerun()
 
 if __name__ == "__main__":
     main()
