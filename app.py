@@ -808,7 +808,7 @@ def main():
                                         source_filename = os.path.basename(source)
                                         st.markdown(f"👤 {source_filename}")
                                         st.markdown(doc.page_content)
-                                        st.markdown(raw_ans)
+                                        st.html(raw_ans)
 
 
         except Exception as e:
