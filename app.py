@@ -831,94 +831,70 @@ def main():
                         height=200
                     )
                                 
-                # 메인 함수에서 RAG 부분 수정
-                def setup_rag_chatbot(uploaded_file, df):
-                    """RAG 챗봇 설정"""
-                    st.subheader("🤖 RAG 기반 Q&A 챗봇")
+                # RAG 챗봇 섹션
+                st.markdown("---")
+                st.subheader("🤖 RAG 기반 Q&A 챗봇")
+                
+                if 'OPENAI_API_KEY' in st.secrets:
                     
-                    # OpenAI API 키 확인
-                    if 'OPENAI_API_KEY' not in st.secrets:
-                        st.warning("OpenAI API 키가 설정되지 않았습니다. Streamlit secrets에 OPENAI_API_KEY를 추가해주세요.")
-                        return
-                    
-                    # SPLITTED 컬럼 확인
-                    if 'SPLITTED' not in df.columns:
-                        st.error("RAG 챗봇을 사용하려면 CSV 파일에 'SPLITTED' 컬럼이 필요합니다.")
-                        return
-                    
-                    # 파일 저장 및 해시 생성
+                    # RAG 초기화
                     file_hash = get_file_hash(uploaded_file)
                     temp_dir = tempfile.gettempdir()
-                    temp_path = os.path.join(temp_dir, f"uploaded_file_{file_hash}.csv")
+                    temp_path = os.path.join(temp_dir, f"{file_hash}.csv")
                     
-                    # 임시 파일 저장
-                    try:
-                        with open(temp_path, "wb") as f:
-                            f.write(uploaded_file.getbuffer())
-                    except Exception as e:
-                        st.error(f"파일 저장 실패: {str(e)}")
-                        return
+                    with open(temp_path, "wb") as f:
+                        f.write(uploaded_file.getbuffer())
                     
-                    # RAG 시스템 초기화
-                    with st.spinner("RAG 시스템을 초기화하는 중입니다... (처음 실행 시 시간이 걸릴 수 있습니다)"):
-                        rag_chain = initialize_rag_components(temp_path, file_hash)
+                    with st.spinner("RAG 시스템 초기화 중..."):
+                        rag_chain = initialize_rag_components(temp_path, "gpt-4o-mini")
                     
-                    if not rag_chain:
-                        st.error("RAG 시스템 초기화에 실패했습니다.")
-                        return
-                    
-                    # 채팅 히스토리 설정
-                    chat_history = StreamlitChatMessageHistory(key="chat_messages_rag")
-                    
-                    # 대화형 RAG 체인 설정
-                    conversational_rag_chain = RunnableWithMessageHistory(
-                        rag_chain,
-                        lambda session_id: chat_history,
-                        input_messages_key="input",
-                        history_messages_key="chat_history",
-                        output_messages_key="answer",
-                    )
-                    
-                    # 초기 메시지
-                    if len(chat_history.messages) == 0:
-                        chat_history.add_ai_message("안녕하세요! 업로드된 데이터를 바탕으로 질문에 답변해드립니다. 무엇이 궁금하신가요? 🤗")
-                    
-                    # 채팅 메시지 표시
-                    for msg in chat_history.messages[-8:]:  # 최근 8개 메시지만 표시
-                        with st.chat_message(msg.type):
-                            st.write(msg.content)
-                    
-                    # 질문 입력
-                    if prompt := st.chat_input("질문을 입력하세요"):
-                        # 사용자 메시지 표시
-                        with st.chat_message("human"):
-                            st.write(prompt)
+                    if rag_chain:
+                        chat_history = StreamlitChatMessageHistory(key="chat_messages_user")
                         
-                        # AI 응답
-                        with st.chat_message("ai"):
-                            with st.spinner("답변을 생성하는 중..."):
-                                try:
+                        conversational_rag_chain = RunnableWithMessageHistory(
+                            rag_chain,
+                            lambda session_id: chat_history,
+                            input_messages_key="input",
+                            history_messages_key="history",
+                            output_messages_key="answer",
+                        )
+                        
+                        if len(chat_history.messages) == 0:
+                            chat_history.add_ai_message("업로드된 유저 응답 기반으로 무엇이든 물어보세요! 🤗")
+                        
+                        # 채팅 메시지 표시 (높이 제한)
+                        chat_container = st.container()
+                        with chat_container:
+                            for msg in chat_history.messages[-6:]:  # 최근 6개 메시지만 표시
+                                with st.chat_message(msg.type):
+                                    st.write(msg.content)
+                        
+                        # 질문 입력
+                        if prompt_message := st.chat_input("질문을 입력하세요"):
+                            with st.chat_message("human"):
+                                st.write(prompt_message)
+                            
+                            with st.chat_message("ai"):
+                                with st.spinner("생각 중입니다..."):
                                     config = {"configurable": {"session_id": "user_session"}}
                                     response = conversational_rag_chain.invoke(
-                                        {"input": prompt},
+                                        {"input": prompt_message},
                                         config,
                                     )
-                                    answer = response.get('answer', '답변을 생성할 수 없습니다.')
+                                    answer = response['answer']
                                     st.write(answer)
                                     
-                                    # 참고 문서 표시
-                                    if "관련 내용을 찾을 수 없습니다" not in answer and response.get("context"):
-                                        with st.expander("📚 참고 문서 확인"):
-                                            for i, doc in enumerate(response['context'], 1):
+                                    if "관련된 내용이 없습니다" not in answer and response.get("context"):
+                                        with st.expander("참고 문서 확인"):
+                                            for doc in response['context']:
                                                 source = doc.metadata.get('source', '알 수 없음')
-                                                user_id = doc.metadata.get('user_id', '알 수 없음')
-                                                st.markdown(f"**문서 {i}** (출처: {source}, 사용자: {user_id})")
-                                                st.markdown(f"```\n{doc.page_content[:300]}{'...' if len(doc.page_content) > 300 else ''}\n```")
-                                                st.markdown("---")
-                                                
-                                except Exception as e:
-                                    st.error(f"답변 생성 중 오류가 발생했습니다: {str(e)}")
-                                    st.exception(e)
+                                                st.markdown(f"👤 {source}")
+                                                st.markdown(doc.page_content[:200] + "...")
+                    else:
+                        st.error("RAG 시스템 초기화에 실패했습니다.")
+
+                elif 'OPENAI_API_KEY' not in st.secrets:
+                    st.warning("OpenAI API 키가 설정되지 않았습니다. Streamlit secrets에 OPENAI_API_KEY를 추가해주세요.")
                     
         except Exception as e:
             st.error(f"파일 처리 중 오류가 발생했습니다: {str(e)}")
