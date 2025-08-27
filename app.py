@@ -22,6 +22,8 @@ from langchain_core.runnables import RunnableMap
 from sentence_transformers import SentenceTransformer
 from langchain_core.embeddings import Embeddings
 
+from langchain_chroma import Chroma
+from chromadb.config import Settings
 
 import hashlib
 import shutil
@@ -37,7 +39,8 @@ __import__('pysqlite3')
 import sys
 sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
 
-from langchain_chroma import Chroma
+
+
 os.environ["OPENAI_API_KEY"] = st.secrets['OPENAI_API_KEY']
 
 # ✅ CSV 로딩 → 유저 단위로 문서 생성
@@ -94,7 +97,7 @@ def create_vector_store(file_path: str, cache_buster: str):
     collection_name = f"coll_{file_hash}"
 
     # ✅ 쓰기 가능한 루트 (예: /tmp)
-    persist_root = os.path.join(tempfile.gettempdir(), "chroma_db_user")
+    #persist_root = os.path.join(tempfile.gettempdir(), "chroma_db_user")
     persist_dir = os.path.join(persist_root, collection_name)
 
     # 폴더 깨끗하게 재생성
@@ -102,11 +105,21 @@ def create_vector_store(file_path: str, cache_buster: str):
     os.makedirs(persist_dir, exist_ok=True)  # ✅ 부모/자식 모두 보장
 
     embeddings = get_embedder()
+
+    # 👇👇 여기에 추가 (Settings + sqlite 명시)
+    client_settings = Settings(
+        anonymized_telemetry=False,
+        is_persistent=True,
+        chroma_db_impl="sqlite",      # duckdb+parquet 권장 시 "duckdb+parquet"로 교체
+        persist_directory=persist_dir,
+    )
+    
     vectorstore = Chroma.from_documents(
         split_docs,
         embeddings,
         collection_name=collection_name,
         persist_directory=persist_dir,
+        client_settings=client_settings,   # 👈 반드시 전달
     )
     return vectorstore
 
@@ -737,14 +750,15 @@ def main():
 
                 # 파일이 바뀌면 히스토리 초기화
                 if st.session_state.get("last_file_hash") != file_hash:
-                    st.cache_resource.clear()  # ✅ 메모리 캐시 날리기
-                    shutil.rmtree(os.path.join(tempfile.gettempdir(), "chroma_db_user"), ignore_errors=True)
-                    # 기존 히스토리 키가 있으면 제거
+                    st.cache_resource.clear()
+                    persist_root = os.path.join(tempfile.gettempdir(), "chroma_db_user")
+                    shutil.rmtree(persist_root, ignore_errors=True)   # ← 루트 전체 삭제
                     old_key = st.session_state.get("chat_history_key")
                     if old_key and old_key in st.session_state:
                         del st.session_state[old_key]
                     st.session_state["last_file_hash"] = file_hash
-                    st.session_state["chat_session_nonce"] = 0  # 파일 바뀌면 nonce 초기화
+                    st.session_state["chat_session_nonce"] = 0
+                    st.rerun()  # ← 중요
                 
                 # 현재 세션 식별자(파일 해시 + nonce)
                 chat_session_id = f"{file_hash}-{st.session_state['chat_session_nonce']}"
@@ -878,8 +892,10 @@ def main():
                 
 if st.button("🔄 캐시/벡터DB 초기화(리셋버튼..!)"):
     st.cache_resource.clear()
-    shutil.rmtree(os.path.join(tempfile.gettempdir(), "chroma_db_user"), ignore_errors=True)
+    persist_root = os.path.join(tempfile.gettempdir(), "chroma_db_user")
+    shutil.rmtree(persist_root, ignore_errors=True)   # ← 루트 전체 삭제
     st.success("초기화 완료")
+    st.rerun()  # ← 중요: 바로 재실행해 이전 핸들 끊기
 
 if __name__ == "__main__":
     main()
