@@ -22,6 +22,8 @@ from langchain_core.runnables import RunnableMap
 from sentence_transformers import SentenceTransformer
 from langchain_core.embeddings import Embeddings
 
+from langchain_chroma import Chroma
+from chromadb.config import Settings
 
 import hashlib
 import shutil
@@ -36,8 +38,6 @@ def get_file_hash(uploaded_file):
 __import__('pysqlite3')
 import sys
 sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
-
-from langchain_chroma import Chroma
 os.environ["OPENAI_API_KEY"] = st.secrets['OPENAI_API_KEY']
 
 # ✅ CSV 로딩 → 유저 단위로 문서 생성
@@ -101,13 +101,28 @@ def create_vector_store(file_path: str, cache_buster: str):
     shutil.rmtree(persist_dir, ignore_errors=True)
     os.makedirs(persist_dir, exist_ok=True)  # ✅ 부모/자식 모두 보장
 
-    embeddings = get_embedder()
-    vectorstore = Chroma.from_documents(
-        split_docs,
-        embeddings,
-        collection_name=collection_name,
-        persist_directory=persist_dir,
+    # 4) DuckDB 백엔드로 PersistentClient 생성
+    #    (telemetry 끄기, reset 허용)
+    client = chromadb.PersistentClient(
+        path=persist_dir,
+        settings=Settings(
+            anonymized_telemetry=False,
+            allow_reset=True,
+            # DuckDB는 기본값이지만, 혹시 몰라 명시하고 싶다면:
+            # chroma_db_impl="duckdb+parquet"
+        ),
     )
+    
+    embeddings = get_embedder()
+    # 6) 빈 컬렉션에 붙인 뒤 add_documents로 추가
+    vectorstore = Chroma(
+        client=client,
+        collection_name=collection_name,
+        embedding_function=embeddings,
+    )
+    if split_docs:
+        vectorstore.add_documents(split_docs)
+
     return vectorstore
 
 # ✅ RAG 체인 초기화
