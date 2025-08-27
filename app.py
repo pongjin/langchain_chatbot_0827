@@ -64,7 +64,6 @@ def get_embedder():
             with st.spinner(f"🤖 임베딩 모델을 로드하는 중입니다... ({model_name})"):
                 try:
                     self.model = SentenceTransformer(model_name)
-                    #st.success(f"✅ 임베딩 모델 로드 성공: {model_name}")
                 except Exception as e:
                     st.error(f"❌ 임베딩 모델 로드 실패: {str(e)}")
                     raise e
