@@ -571,6 +571,7 @@ def get_embedder():
 def create_vector_store(file_path: str):
     docs = load_csv_and_create_docs(file_path)
     if not docs:
+        st.dataframe(df2)
         return None
         
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=0)
@@ -716,7 +717,6 @@ def main():
                         f.write(uploaded_file.getbuffer())
 
                     df2 = pd.read_csv(temp_path)
-                    st.dataframe(df2)
                     
                     with st.spinner("RAG 시스템 초기화 중..."):
                         rag_chain = initialize_rag_components(temp_path, "gpt-4o-mini")
