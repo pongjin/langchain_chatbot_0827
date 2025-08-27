@@ -45,14 +45,19 @@ os.environ["OPENAI_API_KEY"] = st.secrets['OPENAI_API_KEY']
 def load_csv_and_create_docs(file_path: str, cache_buster: str):
     df = pd.read_csv(file_path)
 
-    if 'user_id' not in df.columns or 'SPLITTED' not in df.columns:
+    if 'user_id' not in df.columns or 'SPLITTED' not in df.columns or 'highlighted_ans' not in df.columns:
         st.error("해당하는 컬럼 없음")
         return []
 
     docs = []
     for idx, row in df.iterrows():
-        content = str(row['SPLITTED'])  # 한 행의 SPLITTED 값
-        metadata = {"source": f"row_{idx}"}  # 행 인덱스를 소스로 사용
+        content = str(row['SPLITTED'])
+        metadata = {
+            "source": f"row_{idx}"
+        }
+        # ✅ ans 컬럼 있으면 metadata에 추가
+        if "highlighted_ans" in df.columns:
+            metadata["highlighted_ans"] = str(row["ans"])
         docs.append(Document(page_content=content, metadata=metadata))
     return docs
 
@@ -815,7 +820,10 @@ def main():
                                         source_filename = os.path.basename(source)
                                         st.markdown(f"👤 {source_filename}")
                                         st.markdown(doc.page_content)
-        
+                                        # ✅ ans 컬럼 값도 같이 출력
+                                        ans_text = doc.metadata.get("ans")
+                                        if ans_text:
+                                            st.markdown(f"📝 **원문 응답:** {ans_text}")
                     
         except Exception as e:
             st.error(f"파일 처리 중 오류가 발생했습니다: {str(e)}")
