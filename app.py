@@ -711,12 +711,12 @@ def main():
                     # 기본 정보 메트릭
                     col1, col2, col3 = st.columns(3)
                     with col1:
-                        st.metric("전체 행수", len(df))
+                        st.metric("전체 행수(주제 단위 분리)", len(df))
                     with col2:
                         filtered_df = df[df.total_cl != 99]
-                        st.metric("유효 응답", len(filtered_df))
+                        st.metric("유효 응답(주제 단위 분리)", len(filtered_df))
                     with col3:
-                        st.metric("총 응답자", df.user_id.nunique())
+                        st.metric("총 유효 응답자수", df.user_id.nunique())
 
                     # Summary Table
                     st.subheader("📋 Summary Table")
@@ -804,9 +804,11 @@ def main():
                                 with st.expander("참고 문서 확인"):
                                     for doc in response['context']:
                                         source = doc.metadata.get('source', '알 수 없음')
+                                        raw_ans = doc.metadata.get('highlighted_ans', '알 수 없음')
                                         source_filename = os.path.basename(source)
                                         st.markdown(f"👤 {source_filename}")
                                         st.markdown(doc.page_content)
+                                        st.markdown(raw_ans)
 
 
         except Exception as e:
@@ -857,7 +859,7 @@ def main():
                 * 두 기능을 모두 사용하려면 모든 컬럼이 필요합니다
                 """)
 
-if st.button("🔄 캐시/벡터DB 초기화(리셋버튼..!)"):
+if st.button("🔄 새로고침 버튼을 누르세요"):
     st.cache_resource.clear()
     shutil.rmtree(os.path.join(tempfile.gettempdir(), "chroma_db_user"), ignore_errors=True)
     st.success("초기화 완료")
