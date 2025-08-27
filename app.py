@@ -572,15 +572,15 @@ def create_vector_store(file_path: str):
     docs = load_csv_and_create_docs(file_path)
     if not docs:
         return None
-    st.title("여기 오류임1")
+
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=0)
     split_docs = text_splitter.split_documents(docs)
-    st.title("여기 오류임2")
+
     file_hash = os.path.splitext(os.path.basename(file_path))[0]
     persist_dir = f"./chroma_db_user/{file_hash}"
     if os.path.exists(persist_dir):
         shutil.rmtree(persist_dir, ignore_errors=True)
-    st.title("여기 오류임3")
+
     embeddings = get_embedder()
     try:
         vectorstore = Chroma.from_documents(
@@ -591,6 +591,8 @@ def create_vector_store(file_path: str):
         return vectorstore
     except Exception as e:
         st.error(f"Chroma 생성 중 오류: {str(e)}")
+        import traceback
+        st.text(traceback.format_exc())   # 전체 스택트레이스 출력
         return None
     
 
