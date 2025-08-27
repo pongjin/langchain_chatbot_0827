@@ -643,7 +643,7 @@ def main():
             has_mindmap_columns = all(col in df.columns for col in mindmap_columns)
             
             
-            if not has_mindmap_columns and not has_rag_columns:
+            if not has_mindmap_column:
                 st.error("마인드맵 또는 RAG 기능을 위한 필수 컬럼이 없습니다.")
                 st.info("user_id, total_cl, summary, keywords, SPLITTED")
                 st.stop()
@@ -705,7 +705,7 @@ def main():
                 st.markdown("---")
                 st.subheader("🤖 RAG 기반 Q&A 챗봇")
                 
-                if has_rag_columns and 'OPENAI_API_KEY' in st.secrets:
+                if 'OPENAI_API_KEY' in st.secrets:
                     
                     # RAG 초기화
                     file_hash = get_file_hash(uploaded_file)
@@ -762,9 +762,7 @@ def main():
                                                 st.markdown(doc.page_content[:200] + "...")
                     else:
                         st.error("RAG 시스템 초기화에 실패했습니다. user_id와 answer 컬럼을 확인해주세요.")
-                        
-                elif not has_rag_columns:
-                    st.info("RAG 챗봇 기능을 위해서는 user_id, answer 컬럼이 필요합니다.")
+
                 elif 'OPENAI_API_KEY' not in st.secrets:
                     st.warning("OpenAI API 키가 설정되지 않았습니다. Streamlit secrets에 OPENAI_API_KEY를 추가해주세요.")
                     
