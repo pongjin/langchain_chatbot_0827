@@ -737,6 +737,8 @@ def main():
 
                 # 파일이 바뀌면 히스토리 초기화
                 if st.session_state.get("last_file_hash") != file_hash:
+                    st.cache_resource.clear()  # ✅ 메모리 캐시 날리기
+                    shutil.rmtree(os.path.join(tempfile.gettempdir(), "chroma_db_user"), ignore_errors=True)
                     # 기존 히스토리 키가 있으면 제거
                     old_key = st.session_state.get("chat_history_key")
                     if old_key and old_key in st.session_state:
