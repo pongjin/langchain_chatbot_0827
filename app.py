@@ -550,7 +550,7 @@ def load_csv_and_create_docs(file_path: str):
     for idx, row in df.iterrows():
         content = str(row['SPLITTED'])  # 한 행의 SPLITTED 값
         metadata = {"source": f"row_{idx}"}  # 행 인덱스를 소스로 사용
-
+        docs.append(Document(page_content=content, metadata=metadata))
     return docs
 
 @st.cache_resource
