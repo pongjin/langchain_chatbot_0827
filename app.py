@@ -729,7 +729,7 @@ def main():
                 # 세션 상태 초기화
                 if "chat_session_nonce" not in st.session_state:
                     st.session_state["chat_session_nonce"] = 0
-                
+
                 # 파일이 바뀌면 히스토리 초기화
                 if st.session_state.get("last_file_hash") != file_hash:
                     # 기존 히스토리 키가 있으면 제거
@@ -741,29 +741,34 @@ def main():
                 
                 # 현재 세션 식별자(파일 해시 + nonce)
                 chat_session_id = f"{file_hash}-{st.session_state['chat_session_nonce']}"
-                chat_history_key = f"chat_messages_{chat_session_id}"
-                
+                chat_history_key = f"chat_messages_{chat_session_id}"      
                 # 이 값을 저장해두면 다음 턴에서 접근 가능
                 st.session_state["chat_history_key"] = chat_history_key
-               
-                conversational_rag_chain = RunnableWithMessageHistory(
-                    rag_chain,
-                    lambda session_id: chat_history,
-                    input_messages_key="input",
-                    history_messages_key="history",
-                    output_messages_key="answer",
-                )
-                
+
                 temp_dir = tempfile.gettempdir()
                 temp_path = os.path.join(temp_dir, f"{file_hash}.csv")
-    
                 with open(temp_path, "wb") as f:
                     f.write(uploaded_file.getbuffer())
-            
-                rag_chain = initialize_components(temp_path, "gpt-4o-mini", cache_buster=file_hash)
+
+                # ✅ rag_chain을 미리 초기화
+                rag_chain = None
+                try:
+                    # 시그니처에 cache_buster를 추가했다면:
+                    rag_chain = initialize_components(temp_path, "gpt-4o-mini", cache_buster=file_hash)
+                    # (만약 시그니처를 안 바꿨다면 위 줄을 아래 줄로 바꾸세요)
+                    # rag_chain = initialize_components(temp_path, "gpt-4o-mini")
+                except Exception as e:
+                    st.error(f"RAG 초기화 중 오류가 발생했습니다: {e}")
+                    st.stop()  # 이후 코드 진행 차단(중요)
+                
+                # ✅ 방어적으로 재확인
+                if rag_chain is None:
+                    st.error("RAG 체인 생성에 실패했습니다.")
+                    st.stop()
+
                 chat_history = StreamlitChatMessageHistory(key=chat_history_key) #StreamlitChatMessageHistory(key="chat_messages_user")
                 config = {"configurable": {"session_id": chat_session_id}}
-
+               
                 conversational_rag_chain = RunnableWithMessageHistory(
                     rag_chain,
                     lambda session_id: chat_history,
