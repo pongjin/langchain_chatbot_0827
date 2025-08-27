@@ -33,6 +33,213 @@ from langchain_chroma import Chroma
 if 'OPENAI_API_KEY' in st.secrets:
     os.environ["OPENAI_API_KEY"] = st.secrets['OPENAI_API_KEY']
 
+# RAG 관련 함수들
+def get_file_hash(uploaded_file):
+    file_content = uploaded_file.read()
+    uploaded_file.seek(0)
+    return hashlib.md5(file_content).hexdigest()
+
+def load_csv_and_create_docs(file_path: str):
+    """CSV 파일을 로드하고 Document 객체들을 생성"""
+    try:
+        df = pd.read_csv(file_path)
+        
+        # SPLITTED 컬럼이 있는지 확인
+        if 'SPLITTED' not in df.columns:
+            st.error("CSV 파일에 'SPLITTED' 컬럼이 없습니다.")
+            return []
+        
+        docs = []
+        for idx, row in df.iterrows():
+            # SPLITTED 값이 비어있지 않은지 확인
+            content = str(row['SPLITTED']).strip()
+            if content and content != 'nan' and len(content) > 0:
+                metadata = {
+                    "source": f"row_{idx}",
+                    "user_id": str(row.get('user_id', f'user_{idx}'))
+                }
+                docs.append(Document(page_content=content, metadata=metadata))
+        
+        st.info(f"총 {len(docs)}개의 문서를 생성했습니다.")
+        return docs
+        
+    except Exception as e:
+        st.error(f"CSV 파일 로딩 중 오류: {str(e)}")
+        return []
+
+class STEmbedding(Embeddings):
+    """SentenceTransformer 기반 임베딩 클래스"""
+    def __init__(self, model_name: str):
+        try:
+            self.model = SentenceTransformer(model_name)
+            st.success(f"임베딩 모델 로드 성공: {model_name}")
+        except Exception as e:
+            st.error(f"임베딩 모델 로드 실패: {str(e)}")
+            # 대체 모델 사용
+            self.model = SentenceTransformer("all-MiniLM-L6-v2")
+            st.info("대체 모델(all-MiniLM-L6-v2)을 사용합니다.")
+
+    def embed_documents(self, texts):
+        try:
+            return self.model.encode(list(texts), normalize_embeddings=True).tolist()
+        except Exception as e:
+            st.error(f"문서 임베딩 중 오류: {str(e)}")
+            return []
+
+    def embed_query(self, text):
+        try:
+            return self.model.encode(text, normalize_embeddings=True).tolist()
+        except Exception as e:
+            st.error(f"쿼리 임베딩 중 오류: {str(e)}")
+            return []
+
+def get_embedder():
+    """임베딩 모델 가져오기"""
+    try:
+        return STEmbedding("dragonkue/snowflake-arctic-embed-l-v2.0-ko")
+    except Exception as e:
+        st.warning(f"기본 임베딩 모델 로드 실패: {str(e)}")
+        try:
+            return STEmbedding("all-MiniLM-L6-v2")
+        except Exception as e2:
+            st.error(f"대체 임베딩 모델도 로드 실패: {str(e2)}")
+            return None
+
+def create_vector_store(file_path: str, file_hash: str):
+    """벡터 스토어 생성"""
+    try:
+        # 1. 문서 로드
+        st.info("1단계: 문서를 로드하는 중...")
+        docs = load_csv_and_create_docs(file_path)
+        if not docs:
+            st.error("문서 로딩 실패 또는 빈 문서")
+            return None
+
+        # 2. 텍스트 분할
+        st.info("2단계: 텍스트를 분할하는 중...")
+        text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=1000, 
+            chunk_overlap=100,
+            separators=["\n\n", "\n", ".", "!", "?", ",", " ", ""]
+        )
+        split_docs = text_splitter.split_documents(docs)
+        st.success(f"문서가 {len(split_docs)}개 청크로 분할되었습니다.")
+
+        # 3. 임베딩 모델 로드
+        st.info("3단계: 임베딩 모델을 로드하는 중...")
+        embeddings = get_embedder()
+        if embeddings is None:
+            st.error("임베딩 모델 로드 실패")
+            return None
+
+        # 4. 벡터스토어 디렉토리 설정
+        persist_dir = os.path.join(tempfile.gettempdir(), f"chroma_db_{file_hash}")
+        
+        # 기존 디렉토리가 있으면 삭제
+        if os.path.exists(persist_dir):
+            try:
+                shutil.rmtree(persist_dir)
+                st.info(f"기존 벡터스토어 삭제: {persist_dir}")
+            except Exception as e:
+                st.warning(f"기존 디렉토리 삭제 실패: {str(e)}")
+
+        # 5. Chroma 벡터스토어 생성
+        st.info("4단계: 벡터스토어를 생성하는 중...")
+        try:
+            vectorstore = Chroma.from_documents(
+                documents=split_docs,
+                embedding=embeddings,
+                persist_directory=persist_dir,
+                collection_name=f"docs_{file_hash[:8]}"
+            )
+            st.success(f"벡터스토어 생성 성공! 경로: {persist_dir}")
+            return vectorstore
+            
+        except Exception as e:
+            st.error(f"Chroma 벡터스토어 생성 중 오류: {str(e)}")
+            
+            # OpenAI 임베딩으로 대체 시도
+            st.info("OpenAI 임베딩으로 대체 시도...")
+            try:
+                openai_embeddings = OpenAIEmbeddings()
+                vectorstore = Chroma.from_documents(
+                    documents=split_docs,
+                    embedding=openai_embeddings,
+                    persist_directory=persist_dir,
+                    collection_name=f"docs_{file_hash[:8]}"
+                )
+                st.success("OpenAI 임베딩으로 벡터스토어 생성 성공!")
+                return vectorstore
+            except Exception as e2:
+                st.error(f"OpenAI 임베딩으로도 실패: {str(e2)}")
+                return None
+
+    except Exception as e:
+        st.error(f"벡터스토어 생성 중 예상치 못한 오류: {str(e)}")
+        st.exception(e)
+        return None
+
+def initialize_rag_components(file_path: str, file_hash: str, selected_model: str = "gpt-4o-mini"):
+    """RAG 시스템 초기화"""
+    try:
+        st.info("RAG 시스템을 초기화하는 중...")
+        
+        # 벡터스토어 생성
+        vectorstore = create_vector_store(file_path, file_hash)
+        if not vectorstore:
+            st.error("벡터스토어 생성 실패")
+            return None
+        
+        # 검색기 생성
+        retriever = vectorstore.as_retriever(
+            search_type="similarity",
+            search_kwargs={"k": 3}
+        )
+        
+        # 프롬프트 설정
+        contextualize_q_prompt = ChatPromptTemplate.from_messages([
+            ("system", "이전 대화 내용과 현재 질문을 고려하여, 현재 질문을 독립형 질문으로 다시 작성해주세요. 만약 이전 대화 내용이 필요하지 않다면 질문을 그대로 반환하세요."),
+            MessagesPlaceholder("chat_history"),
+            ("human", "{input}"),
+        ])
+
+        qa_prompt = ChatPromptTemplate.from_messages([
+            ("system", """다음 문서 내용을 참고하여 질문에 한국어로 답변해주세요. 
+
+참고 문서:
+{context}
+
+답변 규칙:
+1. 문서의 내용을 바탕으로 정확하고 상세하게 답변하세요
+2. 문서에서 관련 정보를 찾을 수 없으면 "제공된 문서에서 관련 내용을 찾을 수 없습니다"라고 답변하세요
+3. 추측이나 가정하지 말고, 오직 문서의 내용만 활용하세요
+4. 가능하면 구체적인 예시나 인용을 포함하세요"""),
+            MessagesPlaceholder("chat_history"),
+            ("human", "{input}"),
+        ])
+
+        # LLM 설정
+        llm = ChatOpenAI(
+            model=selected_model,
+            temperature=0.1,
+            max_tokens=1000
+        )
+        
+        # 체인 생성
+        history_aware_retriever = create_history_aware_retriever(
+            llm, retriever, contextualize_q_prompt
+        )
+        question_answer_chain = create_stuff_documents_chain(llm, qa_prompt)
+        rag_chain = create_retrieval_chain(history_aware_retriever, question_answer_chain)
+
+        st.success("RAG 시스템 초기화 완료!")
+        return rag_chain
+
+    except Exception as e:
+        st.error(f"RAG 시스템 초기화 중 오류: {str(e)}")
+        st.exception(e)
+        return None
+
 def create_tree_data_from_csv(df):
     """
     CSV 데이터에서 트리 데이터 구조를 생성하는 함수
@@ -536,92 +743,8 @@ def create_hierarchical_mindmap_from_data(tree_data):
     
     return html_code, dynamic_height
 
-# RAG 관련 함수들
-def get_file_hash(uploaded_file):
-    file_content = uploaded_file.read()
-    uploaded_file.seek(0)
-    return hashlib.md5(file_content).hexdigest()
 
-@st.cache_resource
-def load_csv_and_create_docs(file_path: str):
-    df = pd.read_csv(file_path)
 
-    docs = []
-    for idx, row in df.iterrows():
-        content = str(row['SPLITTED'])  # 한 행의 SPLITTED 값
-        metadata = {"source": f"row_{idx}"}  # 행 인덱스를 소스로 사용
-        docs.append(Document(page_content=content, metadata=metadata))
-    return docs
-
-@st.cache_resource
-def get_embedder():
-    class STEmbedding(Embeddings):
-        def __init__(self, model_name: str):
-            self.model = SentenceTransformer(model_name)
-
-        def embed_documents(self, texts):
-            return self.model.encode(list(texts), normalize_embeddings=True).tolist()
-
-        def embed_query(self, text):
-            return self.model.encode(text, normalize_embeddings=True).tolist()
-
-    return STEmbedding("dragonkue/snowflake-arctic-embed-l-v2.0-ko")
-
-@st.cache_resource
-def create_vector_store(file_path: str):
-    docs = load_csv_and_create_docs(file_path)
-    if not docs:
-        return None
-
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=0)
-    split_docs = text_splitter.split_documents(docs)
-
-    file_hash = os.path.splitext(os.path.basename(file_path))[0]
-    persist_dir = f"./chroma_db_user/{file_hash}"
-    if os.path.exists(persist_dir):
-        shutil.rmtree(persist_dir, ignore_errors=True)
-
-    embeddings = get_embedder()
-    try:
-        vectorstore = Chroma.from_documents(
-            split_docs,
-            embeddings,
-            persist_directory=persist_dir
-        )
-        return vectorstore
-    except Exception as e:
-        st.error(f"Chroma 생성 중 오류: {str(e)}")
-        import traceback
-        st.text(traceback.format_exc())   # 전체 스택트레이스 출력
-        return None
-    
-
-@st.cache_resource
-def initialize_rag_components(file_path: str, selected_model: str):
-    vectorstore = create_vector_store(file_path)
-    if not vectorstore:
-        return None
-        
-    retriever = vectorstore.as_retriever()
-
-    contextualize_q_prompt = ChatPromptTemplate.from_messages([
-        ("system", "이전 대화 내용을 반영해 현재 질문을 독립형 질문으로 바꿔줘."),
-        MessagesPlaceholder("history"),
-        ("human", "{input}"),
-    ])
-
-    qa_prompt = ChatPromptTemplate.from_messages([
-        ("system", "다음 문서 내용을 참고하여 질문에 무조건 한국어로 답변해줘. 문서와 유사한 내용이 없으면 무조건 '관련된 내용이 없습니다'라고 말해줘. 참고 문서는 다음과 같아.\n\n{context}"),
-        MessagesPlaceholder("history"),
-        ("human", "{input}"),
-    ])
-
-    llm = ChatOpenAI(model="gpt-4o-mini")
-    history_aware_retriever = create_history_aware_retriever(llm, retriever, contextualize_q_prompt)
-    question_answer_chain = create_stuff_documents_chain(llm, qa_prompt)
-    rag_chain = create_retrieval_chain(history_aware_retriever, question_answer_chain)
-
-    return rag_chain
 
 def main():
     st.set_page_config(
@@ -707,72 +830,95 @@ def main():
                         use_container_width=True,
                         height=200
                     )
-                
-                # RAG 챗봇 섹션
-                st.markdown("---")
-                st.subheader("🤖 RAG 기반 Q&A 챗봇")
-                
-                if 'OPENAI_API_KEY' in st.secrets:
+                                
+                # 메인 함수에서 RAG 부분 수정
+                def setup_rag_chatbot(uploaded_file, df):
+                    """RAG 챗봇 설정"""
+                    st.subheader("🤖 RAG 기반 Q&A 챗봇")
                     
-                    # RAG 초기화
+                    # OpenAI API 키 확인
+                    if 'OPENAI_API_KEY' not in st.secrets:
+                        st.warning("OpenAI API 키가 설정되지 않았습니다. Streamlit secrets에 OPENAI_API_KEY를 추가해주세요.")
+                        return
+                    
+                    # SPLITTED 컬럼 확인
+                    if 'SPLITTED' not in df.columns:
+                        st.error("RAG 챗봇을 사용하려면 CSV 파일에 'SPLITTED' 컬럼이 필요합니다.")
+                        return
+                    
+                    # 파일 저장 및 해시 생성
                     file_hash = get_file_hash(uploaded_file)
                     temp_dir = tempfile.gettempdir()
-                    temp_path = os.path.join(temp_dir, f"{file_hash}.csv")
+                    temp_path = os.path.join(temp_dir, f"uploaded_file_{file_hash}.csv")
                     
-                    with open(temp_path, "wb") as f:
-                        f.write(uploaded_file.getbuffer())
+                    # 임시 파일 저장
+                    try:
+                        with open(temp_path, "wb") as f:
+                            f.write(uploaded_file.getbuffer())
+                    except Exception as e:
+                        st.error(f"파일 저장 실패: {str(e)}")
+                        return
                     
-                    with st.spinner("RAG 시스템 초기화 중..."):
-                        rag_chain = initialize_rag_components(temp_path, "gpt-4o-mini")
-                    st.dataframe(pd.read_csv(temp_path))
+                    # RAG 시스템 초기화
+                    with st.spinner("RAG 시스템을 초기화하는 중입니다... (처음 실행 시 시간이 걸릴 수 있습니다)"):
+                        rag_chain = initialize_rag_components(temp_path, file_hash)
                     
-                    if rag_chain:
-                        chat_history = StreamlitChatMessageHistory(key="chat_messages_user")
+                    if not rag_chain:
+                        st.error("RAG 시스템 초기화에 실패했습니다.")
+                        return
+                    
+                    # 채팅 히스토리 설정
+                    chat_history = StreamlitChatMessageHistory(key="chat_messages_rag")
+                    
+                    # 대화형 RAG 체인 설정
+                    conversational_rag_chain = RunnableWithMessageHistory(
+                        rag_chain,
+                        lambda session_id: chat_history,
+                        input_messages_key="input",
+                        history_messages_key="chat_history",
+                        output_messages_key="answer",
+                    )
+                    
+                    # 초기 메시지
+                    if len(chat_history.messages) == 0:
+                        chat_history.add_ai_message("안녕하세요! 업로드된 데이터를 바탕으로 질문에 답변해드립니다. 무엇이 궁금하신가요? 🤗")
+                    
+                    # 채팅 메시지 표시
+                    for msg in chat_history.messages[-8:]:  # 최근 8개 메시지만 표시
+                        with st.chat_message(msg.type):
+                            st.write(msg.content)
+                    
+                    # 질문 입력
+                    if prompt := st.chat_input("질문을 입력하세요"):
+                        # 사용자 메시지 표시
+                        with st.chat_message("human"):
+                            st.write(prompt)
                         
-                        conversational_rag_chain = RunnableWithMessageHistory(
-                            rag_chain,
-                            lambda session_id: chat_history,
-                            input_messages_key="input",
-                            history_messages_key="history",
-                            output_messages_key="answer",
-                        )
-                        
-                        if len(chat_history.messages) == 0:
-                            chat_history.add_ai_message("업로드된 유저 응답 기반으로 무엇이든 물어보세요! 🤗")
-                        
-                        # 채팅 메시지 표시 (높이 제한)
-                        chat_container = st.container()
-                        with chat_container:
-                            for msg in chat_history.messages[-6:]:  # 최근 6개 메시지만 표시
-                                with st.chat_message(msg.type):
-                                    st.write(msg.content)
-                        
-                        # 질문 입력
-                        if prompt_message := st.chat_input("질문을 입력하세요"):
-                            with st.chat_message("human"):
-                                st.write(prompt_message)
-                            
-                            with st.chat_message("ai"):
-                                with st.spinner("생각 중입니다..."):
+                        # AI 응답
+                        with st.chat_message("ai"):
+                            with st.spinner("답변을 생성하는 중..."):
+                                try:
                                     config = {"configurable": {"session_id": "user_session"}}
                                     response = conversational_rag_chain.invoke(
-                                        {"input": prompt_message},
+                                        {"input": prompt},
                                         config,
                                     )
-                                    answer = response['answer']
+                                    answer = response.get('answer', '답변을 생성할 수 없습니다.')
                                     st.write(answer)
                                     
-                                    if "관련된 내용이 없습니다" not in answer and response.get("context"):
-                                        with st.expander("참고 문서 확인"):
-                                            for doc in response['context']:
+                                    # 참고 문서 표시
+                                    if "관련 내용을 찾을 수 없습니다" not in answer and response.get("context"):
+                                        with st.expander("📚 참고 문서 확인"):
+                                            for i, doc in enumerate(response['context'], 1):
                                                 source = doc.metadata.get('source', '알 수 없음')
-                                                st.markdown(f"👤 {source}")
-                                                st.markdown(doc.page_content[:200] + "...")
-                    else:
-                        st.error("RAG 시스템 초기화에 실패했습니다.")
-
-                elif 'OPENAI_API_KEY' not in st.secrets:
-                    st.warning("OpenAI API 키가 설정되지 않았습니다. Streamlit secrets에 OPENAI_API_KEY를 추가해주세요.")
+                                                user_id = doc.metadata.get('user_id', '알 수 없음')
+                                                st.markdown(f"**문서 {i}** (출처: {source}, 사용자: {user_id})")
+                                                st.markdown(f"```\n{doc.page_content[:300]}{'...' if len(doc.page_content) > 300 else ''}\n```")
+                                                st.markdown("---")
+                                                
+                                except Exception as e:
+                                    st.error(f"답변 생성 중 오류가 발생했습니다: {str(e)}")
+                                    st.exception(e)
                     
         except Exception as e:
             st.error(f"파일 처리 중 오류가 발생했습니다: {str(e)}")
