@@ -22,9 +22,9 @@ from langchain_core.runnables import RunnableMap
 from sentence_transformers import SentenceTransformer
 from langchain_core.embeddings import Embeddings
 
-
 import hashlib
 import shutil
+import chromadb # ✅ 수정: chromadb 임포트 추가
 
 # ✅ 파일 해시 생성
 def get_file_hash(uploaded_file):
@@ -53,11 +53,9 @@ def load_csv_and_create_docs(file_path: str, cache_buster: str):
     for idx, row in df.iterrows():
         content = str(row['SPLITTED'])
         metadata = {
-            "source": f"row_{idx}"
+            "source": f"row_{idx}",
+            "highlighted_ans": str(row["highlighted_ans"])
         }
-        # ✅ highlighted_ans 컬럼 있으면 metadata에 추가
-        if "highlighted_ans" in df.columns:
-            metadata["highlighted_ans"] = str(row["highlighted_ans"])
         docs.append(Document(page_content=content, metadata=metadata))
     return docs
 
@@ -81,7 +79,7 @@ def get_embedder():
             # 단일 쿼리 인코딩
             return self.model.encode(text, normalize_embeddings=True).tolist()
 
-    return STEmbedding("dragonkue/snowflake-arctic-embed-l-v2.0-ko")  #dragonkue/snowflake-arctic-embed-l-v2.0-ko "all-MiniLM-L6-v2"
+    return STEmbedding("dragonkue/snowflake-arctic-embed-l-v2.0-ko")
 
 # ✅ 벡터스토어 생성
 @st.cache_resource
@@ -102,13 +100,23 @@ def create_vector_store(file_path: str, cache_buster: str):
     os.makedirs(persist_dir, exist_ok=True)  # ✅ 부모/자식 모두 보장
 
     embeddings = get_embedder()
-    vectorstore = Chroma.from_documents(
-        split_docs,
-        embeddings,
+
+    # ✅ 수정된 부분: 클라이언트를 명시적으로 생성하여 DB 초기화 문제를 해결
+    # 1. 명시적으로 ChromaDB 클라이언트를 생성하여 DB를 올바르게 초기화합니다.
+    client = chromadb.PersistentClient(path=persist_dir)
+
+    # 2. 생성된 클라이언트를 사용하여 LangChain Chroma 객체를 초기화합니다.
+    vectorstore = Chroma(
+        client=client,
         collection_name=collection_name,
-        persist_directory=persist_dir,
+        embedding_function=embeddings,
     )
+
+    # 3. 분할된 문서를 벡터스토어에 추가합니다.
+    vectorstore.add_documents(split_docs)
+
     return vectorstore
+
 
 # ✅ RAG 체인 초기화
 @st.cache_resource
@@ -134,7 +142,6 @@ def initialize_components(file_path: str, selected_model: str, cache_buster: str
     rag_chain = create_retrieval_chain(history_aware_retriever, question_answer_chain)
 
     return rag_chain
-
 
 
 def create_tree_data_from_csv(df):
@@ -245,7 +252,7 @@ def create_hierarchical_mindmap_from_data(tree_data):
     # 동적 높이 계산 - 이 부분 추가!
     dynamic_height = calculate_dynamic_height(tree_data)
 
-    # HTML/CSS/JavaScript 코드
+    # HTML/CSS/JavaScript 코드 (이하 동일)
     html_code = f"""
     <!DOCTYPE html>
     <html>
@@ -748,7 +755,7 @@ def main():
                 
                 # 현재 세션 식별자(파일 해시 + nonce)
                 chat_session_id = f"{file_hash}-{st.session_state['chat_session_nonce']}"
-                chat_history_key = f"chat_messages_{chat_session_id}"      
+                chat_history_key = f"chat_messages_{chat_session_id}"    
                 # 이 값을 저장해두면 다음 턴에서 접근 가능
                 st.session_state["chat_history_key"] = chat_history_key
 
@@ -775,7 +782,7 @@ def main():
 
                 chat_history = StreamlitChatMessageHistory(key=chat_history_key) #StreamlitChatMessageHistory(key="chat_messages_user")
                 config = {"configurable": {"session_id": chat_session_id}}
-               
+                
                 conversational_rag_chain = RunnableWithMessageHistory(
                     rag_chain,
                     lambda session_id: chat_history,
@@ -801,10 +808,10 @@ def main():
 
                 if len(chat_history.messages) == 0:
                     chat_history.add_ai_message("업로드된 유저 응답 기반으로 무엇이든 물어보세요! 🤗")
-            
+                
                 for msg in chat_history.messages:
                     st.chat_message(msg.type).write(msg.content)
-            
+                
                 if prompt_message := st.chat_input("질문을 입력하세요"):
                     st.chat_message("human").write(prompt_message)
                     with st.chat_message("ai"):
@@ -815,72 +822,16 @@ def main():
                             )
                             answer = response['answer']
                             st.write(answer)
-            
+                
                             if "관련된 내용이 없습니다" not in answer and response.get("context"):
-                                with st.expander("참고 문서 확인"):
-                                    for doc in response['context']:
-                                        source = doc.metadata.get('source', '알 수 없음')
-                                        source_filename = os.path.basename(source)
-                                        st.markdown(f"👤 {source_filename}")
-                                        st.markdown(doc.page_content)
-                                        # ✅ ans 컬럼 값도 같이 출력
-                                        ans_text = doc.metadata.get("highlighted_ans")
-                                        if ans_text:
-                                            st.markdown(f"📝 **원문 응답:** {ans_text}")
-                    
+                                with st.expander("참고 문서 보기"):
+                                    for doc in response["context"]:
+                                        st.info(f"**원본:** {doc.page_content}")
+                                        if "highlighted_ans" in doc.metadata:
+                                            st.success(f"**하이라이팅:** {doc.metadata['highlighted_ans']}")
+                                        st.markdown("---")
         except Exception as e:
-            st.error(f"파일 처리 중 오류가 발생했습니다: {str(e)}")
-            st.exception(e)
-    
-    else:
-        # 샘플 정보 표시
-        col1, col2 = st.columns([1, 1])
-        
-        with col1:
-            st.info("💡 CSV 파일을 업로드하면 데이터 기반 마인드맵과 RAG 챗봇을 사용할 수 있습니다.")
-            
-            with st.expander("🎨 계층형 마인드맵의 특징"):
-                st.markdown("""
-                **🏗️ 구조**
-                - 메인 주제가 왼쪽에 위치
-                - 키워드들이 오른쪽으로 확장 (세로 배열)
-                - 요약들이 각 키워드에서 더 확장
-                - 곡선 연결선으로 자연스러운 연결
-                
-                **🎯 인터랙션**  
-                - 메인 주제 클릭 → 모든 키워드 표시
-                - 키워드 클릭 → 해당 요약들 표시
-                - 노드 크기 = 응답자 수 반영
-                - 마우스 호버 → 상세 정보 표시
-                """)
-        
-        with col2:
-            with st.expander("📋 CSV 파일 형식 요구사항"):
-                st.markdown("""
-                **마인드맵용 (필수):**
-                ```
-                user_id, total_cl, summary, keywords
-                user001, 1, "제품이 만족스럽다", "제품 만족도"
-                user002, 2, "가격이 합리적이다", "가격"
-                user003, 99, "무효 응답", ""
-                ```
-                
-                **RAG 챗봇용 (선택):**
-                ```
-                user_id, answer
-                user001, "제품에 대한 상세한 의견..."
-                user002, "서비스 경험에 대한 설명..."
-                ```
-                
-                * total_cl != 99 인 데이터만 마인드맵에 사용됩니다
-                * 두 기능을 모두 사용하려면 모든 컬럼이 필요합니다
-                """)
-                
-if st.button("🔄 캐시/벡터DB 초기화(리셋버튼..!)"):
-    st.cache_resource.clear()
-    shutil.rmtree(os.path.join(tempfile.gettempdir(), "chroma_db_user"), ignore_errors=True)
-    st.success("초기화 완료")
-    st.rerun()
+            st.error(f"파일 처리 또는 RAG 실행 중 오류 발생: {e}")
 
 if __name__ == "__main__":
     main()
