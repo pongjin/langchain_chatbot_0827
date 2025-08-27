@@ -1,8 +1,37 @@
+import os
+import tempfile
+import hashlib
+import shutil
 import streamlit as st
 import streamlit.components.v1 as components
 import pandas as pd
 import json
 import numpy as np
+
+# RAG 관련 imports
+from langchain_core.documents import Document
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_openai import OpenAIEmbeddings, ChatOpenAI
+from langchain.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain.chains.combine_documents import create_stuff_documents_chain
+from langchain.chains import create_history_aware_retriever, create_retrieval_chain
+from langchain_core.runnables.history import RunnableWithMessageHistory
+from langchain_community.chat_message_histories.streamlit import StreamlitChatMessageHistory
+from langchain_core.runnables import RunnableMap
+
+from sentence_transformers import SentenceTransformer
+from langchain_core.embeddings import Embeddings
+
+# pysqlite3 패치
+__import__('pysqlite3')
+import sys
+sys.modules['sqlite3'] = sys.modules.pop('pysqlite3')
+
+from langchain_chroma import Chroma
+
+# OpenAI API 키 설정
+if 'OPENAI_API_KEY' in st.secrets:
+    os.environ["OPENAI_API_KEY"] = st.secrets['OPENAI_API_KEY']
 
 def create_tree_data_from_csv(df):
     """
@@ -212,10 +241,9 @@ def create_hierarchical_mindmap_from_data(tree_data):
                 justify-content: center;
                 line-height: 1.4;
                 padding: 8px;
-                width: auto;             /* ← 고정 폭 제거 */
-                min-width: fit-content;  /* ← 내용에 맞춰 최소 폭 자동 */
-                //max-width: 400px;         /* ← 잘림 방지 */
-                overflow: visible;        /* 잘리지 않고 보이도록 */
+                width: auto;
+                min-width: fit-content;
+                overflow: visible;
             }}
             
             .summary-node:hover {{
@@ -414,7 +442,6 @@ def create_hierarchical_mindmap_from_data(tree_data):
                     keywordNode.style.left = keywordX + "px";
                     keywordNode.style.top = (keywordY - keywordSize.height/2) + "px";
                     keywordNode.style.width = keywordSize.width + "px";
-                    //keywordNode.style.height = keywordSize.height + "px";
                     keywordNode.onclick = () => toggleKeyword(keyword.id);
                     
                     keywordNode.onmouseover = (e) => showTooltip(e, keyword);
@@ -460,8 +487,6 @@ def create_hierarchical_mindmap_from_data(tree_data):
                             summaryNode.style.backgroundColor = summary.color;
                             summaryNode.style.left = summaryX + "px";
                             summaryNode.style.top = (summaryY - summarySize.height/2) + "px";
-                            //summaryNode.style.width = summarySize.width + "px";
-                            //summaryNode.style.height = summarySize.height + "px";
                             summaryNode.style.opacity = "0.9";
                             
                             // 텍스트 길이에 따라 폰트 크기 조정
@@ -511,21 +536,101 @@ def create_hierarchical_mindmap_from_data(tree_data):
     
     return html_code, dynamic_height
 
+# RAG 관련 함수들
+def get_file_hash(uploaded_file):
+    file_content = uploaded_file.read()
+    uploaded_file.seek(0)
+    return hashlib.md5(file_content).hexdigest()
+
+@st.cache_resource
+def load_csv_and_create_docs(file_path: str):
+    df = pd.read_csv(file_path)
+
+    docs = []
+    for idx, row in df.iterrows():
+        content = str(row['SPLITTED'])  # 한 행의 SPLITTED 값
+        metadata = {"source": f"row_{idx}"}  # 행 인덱스를 소스로 사용
+
+    return docs
+
+@st.cache_resource
+def get_embedder():
+    class STEmbedding(Embeddings):
+        def __init__(self, model_name: str):
+            self.model = SentenceTransformer(model_name)
+
+        def embed_documents(self, texts):
+            return self.model.encode(list(texts), normalize_embeddings=True).tolist()
+
+        def embed_query(self, text):
+            return self.model.encode(text, normalize_embeddings=True).tolist()
+
+    return STEmbedding("dragonkue/snowflake-arctic-embed-l-v2.0-ko")
+
+@st.cache_resource
+def create_vector_store(file_path: str):
+    docs = load_csv_and_create_docs(file_path)
+    if not docs:
+        return None
+        
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=0)
+    split_docs = text_splitter.split_documents(docs)
+
+    file_hash = os.path.splitext(os.path.basename(file_path))[0]
+    persist_dir = f"./chroma_db_user/{file_hash}"
+    if os.path.exists(persist_dir):
+        shutil.rmtree(persist_dir)
+
+    embeddings = get_embedder()
+    vectorstore = Chroma.from_documents(
+        split_docs,
+        embeddings,
+        persist_directory=persist_dir
+    )
+    return vectorstore
+
+@st.cache_resource
+def initialize_rag_components(file_path: str, selected_model: str):
+    vectorstore = create_vector_store(file_path)
+    if not vectorstore:
+        return None
+        
+    retriever = vectorstore.as_retriever()
+
+    contextualize_q_prompt = ChatPromptTemplate.from_messages([
+        ("system", "이전 대화 내용을 반영해 현재 질문을 독립형 질문으로 바꿔줘."),
+        MessagesPlaceholder("history"),
+        ("human", "{input}"),
+    ])
+
+    qa_prompt = ChatPromptTemplate.from_messages([
+        ("system", "다음 문서 내용을 참고하여 질문에 무조건 한국어로 답변해줘. 문서와 유사한 내용이 없으면 무조건 '관련된 내용이 없습니다'라고 말해줘. 참고 문서는 다음과 같아.\n\n{context}"),
+        MessagesPlaceholder("history"),
+        ("human", "{input}"),
+    ])
+
+    llm = ChatOpenAI(model="gpt-4o-mini")
+    history_aware_retriever = create_history_aware_retriever(llm, retriever, contextualize_q_prompt)
+    question_answer_chain = create_stuff_documents_chain(llm, qa_prompt)
+    rag_chain = create_retrieval_chain(history_aware_retriever, question_answer_chain)
+
+    return rag_chain
+
 def main():
     st.set_page_config(
-        page_title="Hierarchical MindMap",
+        page_title="MindMap & RAG Chatbot",
         page_icon="🧠",
         layout="wide"
     )
     
-    st.title("🧠 계층형 마인드맵 시각화")
+    st.title("🧠 계층형 마인드맵 + RAG 챗봇 시각화")
     st.markdown("---")
     
     # 파일 업로드
     uploaded_file = st.file_uploader(
         "CSV 파일을 업로드하세요", 
         type=['csv'],
-        help="user_id, total_cl, summary, keywords 컬럼이 포함된 CSV 파일"
+        help="user_id, total_cl, summary, keywords, SPLITTED 컬럼 필요"
     )
     
     if uploaded_file is not None:
@@ -534,66 +639,135 @@ def main():
             df = pd.read_csv(uploaded_file)
             
             # 컬럼 확인
-            required_columns = ['user_id', 'total_cl', 'summary', 'keywords']
-            missing_columns = [col for col in required_columns if col not in df.columns]
+            mindmap_columns = ['user_id', 'total_cl', 'summary', 'keywords', 'SPLITTED']
+            has_mindmap_columns = all(col in df.columns for col in mindmap_columns)
             
-            if missing_columns:
-                st.error(f"필수 컬럼이 누락되었습니다: {missing_columns}")
+            
+            if not has_mindmap_columns and not has_rag_columns:
+                st.error("마인드맵 또는 RAG 기능을 위한 필수 컬럼이 없습니다.")
+                st.info("user_id, total_cl, summary, keywords, SPLITTED")
                 st.stop()
             
-            # 트리 데이터 생성
-            with st.spinner("계층형 마인드맵 데이터를 생성하는 중..."):
-                tree_data = create_tree_data_from_csv(df)
-            
-            # 요약 정보 표시
-            st.success(f"✅ 마인드맵 생성 완료! 키워드 {len(tree_data['children'])}개, 총 응답자 {sum(child['cnt'] for child in tree_data['children'])}명")
-            
             # 왼쪽/오른쪽 분할 레이아웃
-            left_col, right_col = st.columns([1, 1])  # 1:1 비율로 분할
+            left_col, right_col = st.columns([1, 1])
             
-            with left_col:
-                st.subheader("🗺️ 인터랙티브 마인드맵")
-                st.markdown("*노드를 클릭하여 펼치기/접기*")
+            # 마인드맵 생성
+            if has_mindmap_columns:
+                tree_data = create_tree_data_from_csv(df)
                 
-                # 계층형 마인드맵 시각화 - 동적 높이 적용
-                html_code, dynamic_height = create_hierarchical_mindmap_from_data(tree_data)
-                components.html(html_code, height=dynamic_height, scrolling=False)
-                
-                # 높이 정보 표시
-                st.caption(f"📏 트리 크기에 따른 동적 높이: {dynamic_height}px")
-                
-                # 마인드맵 사용법
-                with st.expander("💡 사용법"):
-                    st.markdown("""
-                    1. **메인 주제 클릭** → 모든 키워드 표시
-                    2. **키워드 클릭** → 해당 요약들 표시  
-                    3. **마우스 호버** → 상세 정보 표시
-                    4. **노드 크기** = 응답자 수 반영
-                    5. **높이 자동 조정** = 데이터 크기에 맞춰 최적화
-                    """)
+                with left_col:
+                    st.subheader("🗺️ 인터랙티브 마인드맵")
+                    st.markdown("*노드를 클릭하여 펼치기/접기*")
+                    
+                    # 계층형 마인드맵 시각화 - 동적 높이 적용
+                    html_code, dynamic_height = create_hierarchical_mindmap_from_data(tree_data)
+                    components.html(html_code, height=dynamic_height, scrolling=False)
+                    
+                    st.caption(f"📏 트리 크기에 따른 동적 높이: {dynamic_height}px")
+                    
+                    with st.expander("💡 사용법"):
+                        st.markdown("""
+                        1. **메인 주제 클릭** → 모든 키워드 표시
+                        2. **키워드 클릭** → 해당 요약들 표시  
+                        3. **마우스 호버** → 상세 정보 표시
+                        4. **노드 크기** = 응답자 수 반영
+                        5. **높이 자동 조정** = 데이터 크기에 맞춰 최적화
+                        """)
+                        
+            else:
+                with left_col:
+                    st.info("마인드맵 생성을 위해서는 user_id, total_cl, summary, keywords 컬럼이 필요합니다.")
             
             with right_col:
                 st.subheader("📊 데이터 분석")
                 
-                # 기본 정보 메트릭
-                col1, col2, col3 = st.columns(3)
-                with col1:
-                    st.metric("전체 행수(주제 단위 응답 분리)", len(df))
-                with col2:
-                    filtered_df = df[df.total_cl != 99]
-                    st.metric("유효 응답(주제 단위 응답 분리)", len(filtered_df))
-                with col3:
+                if has_mindmap_columns:
+                    # 기본 정보 메트릭
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        st.metric("전체 행수", len(df))
+                    with col2:
+                        filtered_df = df[df.total_cl != 99]
+                        st.metric("유효 응답", len(filtered_df))
+                    with col3:
+                        st.metric("총 응답자", df.user_id.nunique())
+                    
+                    # Summary Table
+                    st.subheader("📋 Summary Table")
                     summary_table = filtered_df.groupby(['keywords','summary'], as_index=False, dropna=False).agg({'user_id': 'nunique'}).rename(columns={'user_id': 'cnt'})
-                    st.metric("총 응답자", df.user_id.nunique())
+                    st.dataframe(
+                        summary_table.sort_values('cnt', ascending=False), 
+                        use_container_width=True,
+                        height=200
+                    )
                 
-                # Summary Table
-                st.subheader("📋 Summary Table")
-                st.dataframe(
-                    summary_table.sort_values('cnt', ascending=False), 
-                    use_container_width=True,
-                    height=300
-                )
+                # RAG 챗봇 섹션
+                st.markdown("---")
+                st.subheader("🤖 RAG 기반 Q&A 챗봇")
                 
+                if has_rag_columns and 'OPENAI_API_KEY' in st.secrets:
+                    
+                    # RAG 초기화
+                    file_hash = get_file_hash(uploaded_file)
+                    temp_dir = tempfile.gettempdir()
+                    temp_path = os.path.join(temp_dir, f"{file_hash}.csv")
+                    
+                    with open(temp_path, "wb") as f:
+                        f.write(uploaded_file.getbuffer())
+                    
+                    with st.spinner("RAG 시스템 초기화 중..."):
+                        rag_chain = initialize_rag_components(temp_path, option)
+                    
+                    if rag_chain:
+                        chat_history = StreamlitChatMessageHistory(key="chat_messages_user")
+                        
+                        conversational_rag_chain = RunnableWithMessageHistory(
+                            rag_chain,
+                            lambda session_id: chat_history,
+                            input_messages_key="input",
+                            history_messages_key="history",
+                            output_messages_key="answer",
+                        )
+                        
+                        if len(chat_history.messages) == 0:
+                            chat_history.add_ai_message("업로드된 유저 응답 기반으로 무엇이든 물어보세요! 🤗")
+                        
+                        # 채팅 메시지 표시 (높이 제한)
+                        chat_container = st.container()
+                        with chat_container:
+                            for msg in chat_history.messages[-6:]:  # 최근 6개 메시지만 표시
+                                with st.chat_message(msg.type):
+                                    st.write(msg.content)
+                        
+                        # 질문 입력
+                        if prompt_message := st.chat_input("질문을 입력하세요"):
+                            with st.chat_message("human"):
+                                st.write(prompt_message)
+                            
+                            with st.chat_message("ai"):
+                                with st.spinner("생각 중입니다..."):
+                                    config = {"configurable": {"session_id": "user_session"}}
+                                    response = conversational_rag_chain.invoke(
+                                        {"input": prompt_message},
+                                        config,
+                                    )
+                                    answer = response['answer']
+                                    st.write(answer)
+                                    
+                                    if "관련된 내용이 없습니다" not in answer and response.get("context"):
+                                        with st.expander("참고 문서 확인"):
+                                            for doc in response['context']:
+                                                source = doc.metadata.get('source', '알 수 없음')
+                                                st.markdown(f"👤 {source}")
+                                                st.markdown(doc.page_content[:200] + "...")
+                    else:
+                        st.error("RAG 시스템 초기화에 실패했습니다. user_id와 answer 컬럼을 확인해주세요.")
+                        
+                elif not has_rag_columns:
+                    st.info("RAG 챗봇 기능을 위해서는 user_id, answer 컬럼이 필요합니다.")
+                elif 'OPENAI_API_KEY' not in st.secrets:
+                    st.warning("OpenAI API 키가 설정되지 않았습니다. Streamlit secrets에 OPENAI_API_KEY를 추가해주세요.")
+                    
         except Exception as e:
             st.error(f"파일 처리 중 오류가 발생했습니다: {str(e)}")
             st.exception(e)
@@ -603,7 +777,7 @@ def main():
         col1, col2 = st.columns([1, 1])
         
         with col1:
-            st.info("💡 CSV 파일을 업로드하면 데이터 기반 계층형 마인드맵을 생성할 수 있습니다.")
+            st.info("💡 CSV 파일을 업로드하면 데이터 기반 마인드맵과 RAG 챗봇을 사용할 수 있습니다.")
             
             with st.expander("🎨 계층형 마인드맵의 특징"):
                 st.markdown("""
@@ -612,7 +786,6 @@ def main():
                 - 키워드들이 오른쪽으로 확장 (세로 배열)
                 - 요약들이 각 키워드에서 더 확장
                 - 곡선 연결선으로 자연스러운 연결
-                - **고정 크기**: 안정적인 표시 보장
                 
                 **🎯 인터랙션**  
                 - 메인 주제 클릭 → 모든 키워드 표시
@@ -623,25 +796,25 @@ def main():
         
         with col2:
             with st.expander("📋 CSV 파일 형식 요구사항"):
-                st.code("""
-                user_id,total_cl,summary,keywords,relevances
-                user001,1,"제품이 만족스럽다","제품 만족도",5
-                user002,2,"가격이 합리적이다","가격",4  
-                user003,1,"서비스가 좋다","서비스 품질",5
-                user004,99,"무효 응답","",1
-                ...
+                st.markdown("""
+                **마인드맵용 (필수):**
+                ```
+                user_id, total_cl, summary, keywords
+                user001, 1, "제품이 만족스럽다", "제품 만족도"
+                user002, 2, "가격이 합리적이다", "가격"
+                user003, 99, "무효 응답", ""
+                ```
                 
-                * total_cl != 99 인 데이터만 사용됩니다
-                * keywords와 summary로 그룹핑하여 user_id를 집계합니다
+                **RAG 챗봇용 (선택):**
+                ```
+                user_id, answer
+                user001, "제품에 대한 상세한 의견..."
+                user002, "서비스 경험에 대한 설명..."
+                ```
+                
+                * total_cl != 99 인 데이터만 마인드맵에 사용됩니다
+                * 두 기능을 모두 사용하려면 모든 컬럼이 필요합니다
                 """)
-                
-            st.markdown("""
-            ### 📝 활용 예시:
-            - **고객 피드백 분석**: 키워드별 의견 분류
-            - **설문조사 결과**: 응답 패턴 시각화  
-            - **텍스트 마이닝**: 주제별 내용 정리
-            - **브레인스토밍**: 아이디어 구조화
-            """)
 
 if __name__ == "__main__":
     main()
