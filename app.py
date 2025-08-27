@@ -97,7 +97,7 @@ def create_vector_store(file_path: str, cache_buster: str):
     collection_name = f"coll_{file_hash}"
 
     # ✅ 쓰기 가능한 루트 (예: /tmp)
-    #persist_root = os.path.join(tempfile.gettempdir(), "chroma_db_user")
+    persist_root = os.path.join(tempfile.gettempdir(), "chroma_db_user")
     persist_dir = os.path.join(persist_root, collection_name)
 
     # 폴더 깨끗하게 재생성
