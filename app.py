@@ -60,8 +60,14 @@ def load_csv_and_create_docs(file_path: str):
 def get_embedder():
     class STEmbedding(Embeddings):
         def __init__(self, model_name: str):
-            # ko 전용 임베딩 모델
-            self.model = SentenceTransformer(model_name)
+            # 안내 메시지 출력
+            with st.spinner(f"🤖 임베딩 모델을 로드하는 중입니다... ({model_name})"):
+                try:
+                    self.model = SentenceTransformer(model_name)
+                    st.success(f"✅ 임베딩 모델 로드 성공: {model_name}")
+                except Exception as e:
+                    st.error(f"❌ 임베딩 모델 로드 실패: {str(e)}")
+                    raise e
 
         def embed_documents(self, texts):
             # 리스트 입력에 대해 배치 인코딩
@@ -71,7 +77,7 @@ def get_embedder():
             # 단일 쿼리 인코딩
             return self.model.encode(text, normalize_embeddings=True).tolist()
 
-    return STEmbedding("all-MiniLM-L6-v2")  #dragonkue/snowflake-arctic-embed-l-v2.0-ko
+    return STEmbedding("dragonkue/snowflake-arctic-embed-l-v2.0-ko")  #dragonkue/snowflake-arctic-embed-l-v2.0-ko "all-MiniLM-L6-v2"
 
 # ✅ 벡터스토어 생성
 @st.cache_resource
@@ -97,7 +103,7 @@ def create_vector_store(file_path: str):
 @st.cache_resource
 def initialize_components(file_path: str, selected_model: str):
     vectorstore = create_vector_store(file_path)
-    retriever = vectorstore.as_retriever()
+    retriever = vectorstore.as_retriever( search_type="similarity",search_kwargs={"k": 10} )
 
     contextualize_q_prompt = ChatPromptTemplate.from_messages([
         ("system", "이전 대화 내용을 반영해 현재 질문을 독립형 질문으로 바꿔줘."),
@@ -710,50 +716,50 @@ def main():
                         use_container_width=True,
                         height=200
                     )
-
-            file_hash = get_file_hash(uploaded_file)
-            temp_dir = tempfile.gettempdir()
-            temp_path = os.path.join(temp_dir, f"{file_hash}.csv")
-
-            with open(temp_path, "wb") as f:
-                f.write(uploaded_file.getbuffer())
-        
-            rag_chain = initialize_components(temp_path, "gpt-4o-mini")
-            chat_history = StreamlitChatMessageHistory(key="chat_messages_user")
-        
-            conversational_rag_chain = RunnableWithMessageHistory(
-                rag_chain,
-                lambda session_id: chat_history,
-                input_messages_key="input",
-                history_messages_key="history",
-                output_messages_key="answer",
-            )
-        
-            if len(chat_history.messages) == 0:
-                chat_history.add_ai_message("업로드된 유저 응답 기반으로 무엇이든 물어보세요! 🤗")
-        
-            for msg in chat_history.messages:
-                st.chat_message(msg.type).write(msg.content)
-        
-            if prompt_message := st.chat_input("질문을 입력하세요"):
-                st.chat_message("human").write(prompt_message)
-                with st.chat_message("ai"):
-                    with st.spinner("생각 중입니다..."):
-                        config = {"configurable": {"session_id": "user_session"}}
-                        response = conversational_rag_chain.invoke(
-                            {"input": prompt_message},
-                            config,
-                        )
-                        answer = response['answer']
-                        st.write(answer)
-        
-                        if "관련된 내용이 없습니다" not in answer and response.get("context"):
-                            with st.expander("참고 문서 확인"):
-                                for doc in response['context']:
-                                    source = doc.metadata.get('source', '알 수 없음')
-                                    source_filename = os.path.basename(source)
-                                    st.markdown(f"👤 {source_filename}")
-                                    st.markdown(doc.page_content)
+    
+                file_hash = get_file_hash(uploaded_file)
+                temp_dir = tempfile.gettempdir()
+                temp_path = os.path.join(temp_dir, f"{file_hash}.csv")
+    
+                with open(temp_path, "wb") as f:
+                    f.write(uploaded_file.getbuffer())
+            
+                rag_chain = initialize_components(temp_path, "gpt-4o-mini")
+                chat_history = StreamlitChatMessageHistory(key="chat_messages_user")
+            
+                conversational_rag_chain = RunnableWithMessageHistory(
+                    rag_chain,
+                    lambda session_id: chat_history,
+                    input_messages_key="input",
+                    history_messages_key="history",
+                    output_messages_key="answer",
+                )
+            
+                if len(chat_history.messages) == 0:
+                    chat_history.add_ai_message("업로드된 유저 응답 기반으로 무엇이든 물어보세요! 🤗")
+            
+                for msg in chat_history.messages:
+                    st.chat_message(msg.type).write(msg.content)
+            
+                if prompt_message := st.chat_input("질문을 입력하세요"):
+                    st.chat_message("human").write(prompt_message)
+                    with st.chat_message("ai"):
+                        with st.spinner("생각 중입니다..."):
+                            config = {"configurable": {"session_id": "user_session"}}
+                            response = conversational_rag_chain.invoke(
+                                {"input": prompt_message},
+                                config,
+                            )
+                            answer = response['answer']
+                            st.write(answer)
+            
+                            if "관련된 내용이 없습니다" not in answer and response.get("context"):
+                                with st.expander("참고 문서 확인"):
+                                    for doc in response['context']:
+                                        source = doc.metadata.get('source', '알 수 없음')
+                                        source_filename = os.path.basename(source)
+                                        st.markdown(f"👤 {source_filename}")
+                                        st.markdown(doc.page_content)
         
                     
         except Exception as e:
