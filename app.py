@@ -571,17 +571,16 @@ def get_embedder():
 def create_vector_store(file_path: str):
     docs = load_csv_and_create_docs(file_path)
     if not docs:
-        st.title("여기 오류임")
         return None
-        
+    st.title("여기 오류임1")
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=0)
     split_docs = text_splitter.split_documents(docs)
-
+    st.title("여기 오류임2")
     file_hash = os.path.splitext(os.path.basename(file_path))[0]
     persist_dir = f"./chroma_db_user/{file_hash}"
     if os.path.exists(persist_dir):
         shutil.rmtree(persist_dir)
-
+    st.title("여기 오류임3")
     embeddings = get_embedder()
     vectorstore = Chroma.from_documents(
         split_docs,
@@ -715,8 +714,6 @@ def main():
                     
                     with open(temp_path, "wb") as f:
                         f.write(uploaded_file.getbuffer())
-
-                    df2 = pd.read_csv(temp_path)
                     
                     with st.spinner("RAG 시스템 초기화 중..."):
                         rag_chain = initialize_rag_components(temp_path, "gpt-4o-mini")
