@@ -55,9 +55,9 @@ def load_csv_and_create_docs(file_path: str, cache_buster: str):
         metadata = {
             "source": f"row_{idx}"
         }
-        # ✅ ans 컬럼 있으면 metadata에 추가
+        # ✅ highlighted_ans 컬럼 있으면 metadata에 추가
         if "highlighted_ans" in df.columns:
-            metadata["highlighted_ans"] = str(row["ans"])
+            metadata["highlighted_ans"] = str(row["highlighted_ans"])
         docs.append(Document(page_content=content, metadata=metadata))
     return docs
 
@@ -683,7 +683,7 @@ def main():
                 tree_data = create_tree_data_from_csv(df)
                 
                 with left_col:
-                    st.subheader("🗺️ 인터랙티브 마인드맵")
+                    st.subheader("🗺️ 키워드 마인드맵")
                     st.markdown("*노드를 클릭하여 펼치기/접기*")
                     
                     # 계층형 마인드맵 시각화 - 동적 높이 적용
@@ -729,6 +729,7 @@ def main():
                     )
     
                 file_hash = get_file_hash(uploaded_file)
+                st.write(get_file_hash(uploaded_file))
 
                 # 세션 상태 초기화
                 if "chat_session_nonce" not in st.session_state:
@@ -821,7 +822,7 @@ def main():
                                         st.markdown(f"👤 {source_filename}")
                                         st.markdown(doc.page_content)
                                         # ✅ ans 컬럼 값도 같이 출력
-                                        ans_text = doc.metadata.get("ans")
+                                        ans_text = doc.metadata.get("highlighted_ans")
                                         if ans_text:
                                             st.markdown(f"📝 **원문 응답:** {ans_text}")
                     
