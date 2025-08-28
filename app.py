@@ -1203,7 +1203,14 @@ def main():
 
                     # Summary Table (4단계 구조)
                     st.subheader("📋 4단계 Summary Table")
-                    summary_table = filtered_df.groupby(['name', 'keywords','summary'], as_index=False, dropna=False).agg({'user_id': 'nunique'}).rename(columns={'user_id': 'cnt'})
+                    summary_table = (
+                        filtered_df
+                        .groupby(['name', 'keywords', 'summary'], as_index=False, dropna=False)
+                        .agg(
+                            cnt=('user_id', 'nunique'),
+                            answers=('SPLITTED', lambda x: list(x.dropna()))
+                        )
+                    )
                     st.dataframe(
                         summary_table.sort_values('cnt', ascending=False), 
                         use_container_width=True,
