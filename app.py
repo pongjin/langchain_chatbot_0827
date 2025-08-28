@@ -1290,7 +1290,7 @@ def main():
                                         raw_ans = doc.metadata.get('ans', '알 수 없음')
                                         source_filename = os.path.basename(source)
                                         st.markdown(f"👤 {source_filename}")
-                                        st.markdown(doc.page_content)
+                                        #st.markdown(doc.page_content)
                                         st.html(raw_ans)
 
         except Exception as e:
