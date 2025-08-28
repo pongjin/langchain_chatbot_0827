@@ -180,6 +180,7 @@ def create_tree_data_from_csv_4level(df):
     tree_data = {
         'id': 'root',
         'name': '주요 응답',
+        'color': '#808080',
         'expanded': False,
         'children': []
     }
@@ -402,6 +403,18 @@ def create_tree_force_hybrid_mindmap_4level(tree_data):
                 filter: drop-shadow(0 6px 12px rgba(0,0,0,0.3)) brightness(1.1);
             }}
             
+            .node-rect {{
+                stroke: #fff;
+                stroke-width: 2px;
+                transition: all 0.3s ease;
+                filter: drop-shadow(0 3px 8px rgba(0,0,0,0.2));
+            }}
+            
+            .node-rect:hover {{
+                stroke-width: 4px;
+                filter: drop-shadow(0 5px 12px rgba(0,0,0,0.3)) brightness(1.1);
+            }}
+            
             .node-text {{
                 font-family: 'Segoe UI', sans-serif;
                 text-anchor: middle;
@@ -502,34 +515,15 @@ def create_tree_force_hybrid_mindmap_4level(tree_data):
             <div class="controls">
                 <button class="control-btn" onclick="toggleExpansion()">전체 펼치기/접기</button>
                 <button class="control-btn" onclick="resetZoom()">줌 리셋</button>
-                <button class="control-btn" onclick="resetTreeLayout()">트리 복원</button>
-                <button class="control-btn" onclick="togglePhysics()">물리엔진 토글</button>
             </div>
             
             <!-- 정보 패널 -->
             <div class="info-panel">
-                <h3>4단계 하이브리드 맵</h3>
-                <div class="legend-item">
-                    <div class="legend-color" style="background: #3b82f6;"></div>
-                    <span><strong>메인</strong></span>
-                </div>
-                <div class="legend-item">
-                    <div class="legend-color" style="background: #ef4444;"></div>
-                    <span>상위개념 (Name)</span>
-                </div>
-                <div class="legend-item">
-                    <div class="legend-color" style="background: #10b981;"></div>
-                    <span>키워드</span>
-                </div>
-                <div class="legend-item">
-                    <div class="legend-color" style="background: #8b5cf6;"></div>
-                    <span>요약</span>
-                </div>
+                <h3>키워드 마인드맵</h3>
                 <div style="margin-top: 12px; padding-top: 10px; border-top: 1px solid #e2e8f0; font-size: 12px; color: #64748b; line-height: 1.4;">
                     <strong>4단계 구조:</strong><br>
                     메인 → 상위개념 → 키워드 → 요약<br>
                     • 드래그로 자유 이동<br>
-                    • 트리 복원으로 원형 복귀
                 </div>
             </div>
             
@@ -538,7 +532,6 @@ def create_tree_force_hybrid_mindmap_4level(tree_data):
             
             <!-- 상태 표시기들 -->
             <div class="zoom-indicator" id="zoomIndicator">줌: 100%</div>
-            <div class="status-indicator" id="statusIndicator">4단계 트리 + 물리엔진</div>
         </div>
         
         <!-- 툴팁 -->
@@ -576,6 +569,28 @@ def create_tree_force_hybrid_mindmap_4level(tree_data):
                 }}
             }}
             
+            // Summary 노드 크기 계산 함수 (직사각형)
+            function getSummaryNodeSize(text, cnt) {{
+                const normalizedCnt = cnt ? (cnt - minCnt) / (maxCnt - minCnt) : 0.3;
+            
+                const maxWidth = 300;  // 한 줄 최대 폭
+                const minWidth = 120;
+                const padding = 20;
+            
+                // 글자 수에 따라 width 계산
+                const approxWidth = text.length * 7; // 글자 폭 추정
+                const width = Math.min(maxWidth, Math.max(minWidth, approxWidth + padding));
+            
+                // --- 🔑 자동 줄바꿈 시 필요한 line 수 추정 ---
+                const charsPerLine = Math.floor((width - padding) / 7);
+                const lines = Math.ceil(text.length / charsPerLine);
+            
+                const lineHeight = 18;
+                const height = lines * lineHeight + 20; // 줄 수에 맞게 높이 조정
+            
+                return {{ width: width, height: height }};
+            }}
+            
             // 트리 목표 위치 계산 함수
             function calculateTreePositions(nodes) {{
                 const width = window.innerWidth;
@@ -588,7 +603,7 @@ def create_tree_force_hybrid_mindmap_4level(tree_data):
                     0: rootX,           // root
                     1: rootX + 180,     // name
                     2: rootX + 360,     // keywords
-                    3: rootX + 540      // summary
+                    3: rootX + 600      // summary (더 오른쪽으로)
                 }};
                 
                 // 각 깊이별 노드들 그룹화
@@ -620,7 +635,7 @@ def create_tree_force_hybrid_mindmap_4level(tree_data):
                                 const siblingCount = siblings.length;
                                 
                                 // 형제 노드들의 Y 위치 계산
-                                const spacing = Math.max(50, Math.min(100, height / (siblingCount + 2)));
+                                const spacing = Math.max(40, Math.min(80, height / (siblingCount + 2)));
                                 const startY = parent.targetY - (siblingCount - 1) * spacing / 2;
                                 
                                 node.targetX = depthXPositions[depthInt];
@@ -754,8 +769,14 @@ def create_tree_force_hybrid_mindmap_4level(tree_data):
                     // 목표 위치로 끌어당기는 힘 (트리 구조 유지)
                     .force("x", d3.forceX(d => d.targetX).strength(0.3))
                     .force("y", d3.forceY(d => d.targetY).strength(0.3))
-                    // 충돌 방지 (겹침 방지)
-                    .force("collision", d3.forceCollide().radius(d => getNodeRadius(d.cnt, d.type) + 5));
+                    // 충돌 방지 (겹침 방지) - summary 노드는 직사각형 고려
+                    .force("collision", d3.forceCollide().radius(d => {{
+                        if (d.type === 'summary') {{
+                            const summarySize = getSummaryNodeSize(d.name, d.cnt);
+                            return Math.max(summarySize.width, summarySize.height) / 2 + 8;
+                        }}
+                        return getNodeRadius(d.cnt, d.type) + 5;
+                    }}));
                 
                 // 링크 렌더링
                 const link = g.selectAll(".link")
@@ -789,9 +810,52 @@ def create_tree_force_hybrid_mindmap_4level(tree_data):
                         .on("end", dragended)
                     );
                 
-                // 노드 원 추가
-                nodeEnter.append("circle")
-                    .attr("class", "node-circle");
+                // 노드 원 추가 (summary는 직사각형)
+                nodeEnter.each(function(d) {{
+                    const nodeGroup = d3.select(this);
+                    if (d.type === 'summary') {{
+                        // ✅ summary 전용 foreignObject 사용
+                        const size = getSummaryNodeSize(d.name, d.cnt);
+                
+                        nodeGroup.append("rect")
+                            .attr("class", "node-rect summary-rect")
+                            .attr("width", size.width)
+                            .attr("height", size.height)
+                            .attr("x", -size.width / 2)
+                            .attr("y", -size.height / 2)
+                            .attr("rx", 8)
+                            .attr("ry", 8)
+                            .attr("fill", d.color);
+                
+                        nodeGroup.append("foreignObject")
+                            .attr("x", -size.width / 2 + 6)
+                            .attr("y", -size.height / 2 + 6)
+                            .attr("width", size.width - 12)
+                            .attr("height", size.height - 12)
+                            .append("xhtml:div")
+                            .style("width", (size.width - 12) + "px")
+                            .style("height", (size.height - 12) + "px")
+                            .style("font-size", "12px")
+                            .style("line-height", "1.4em")
+                            .style("color", "white")
+                            .style("font-family", "Segoe UI, sans-serif")
+                            .style("text-align", "center")
+                            .style("word-wrap", "break-word")
+                            .style("overflow-wrap", "break-word")
+                            .style("display", "flex")
+                            .style("align-items", "center")
+                            .style("justify-content", "center")
+                            .text(d.name);
+                
+                    }} else {{
+                        // ✅ summary가 아닌 경우만 circle + node-text 사용
+                        nodeGroup.append("circle").attr("class", "node-circle");
+                
+                        nodeGroup.append("text")
+                            .attr("class", "node-text")
+                            .text(d => d.name);
+                    }}
+                }});
                 
                 // 노드 텍스트 추가
                 nodeEnter.append("text")
@@ -805,31 +869,54 @@ def create_tree_force_hybrid_mindmap_4level(tree_data):
                 const nodeUpdate = nodeEnter.merge(node)
                     .transition().duration(300).style("opacity", 1);
                 
-                // 노드 원 업데이트
-                nodeUpdate.select(".node-circle")
-                    .attr("r", d => getNodeRadius(d.cnt, d.type))
-                    .attr("fill", d => d.color)
-                    .attr("stroke-width", d => {{
-                        switch(d.type) {{
-                            case 'root': return 5;
-                            case 'name': return 4;
-                            case 'keyword': return 3;
-                            default: return 3;
-                        }}
-                    }});
+                // 노드 원/직사각형 업데이트
+                nodeUpdate.each(function(d) {{
+                    const nodeGroup = d3.select(this);
+                    if (d.type === 'summary') {{
+                        // Summary 노드 직사각형 업데이트
+                        const summarySize = getSummaryNodeSize(d.name, d.cnt);
+                        nodeGroup.select(".node-rect")
+                            .transition().duration(300)
+                            .attr("width", summarySize.width)
+                            .attr("height", summarySize.height)
+                            .attr("x", -summarySize.width / 2)
+                            .attr("y", -summarySize.height / 2)
+                            .attr("rx", 8)
+                            .attr("ry", 8)
+                            .attr("fill", d.color)
+                            .attr("stroke", "#fff")
+                            .attr("stroke-width", 2);
+                    }} else {{
+                        // 원형 노드 업데이트
+                        nodeGroup.select(".node-circle")
+                            .transition().duration(300)
+                            .attr("r", getNodeRadius(d.cnt, d.type))
+                            .attr("fill", d.color)
+                            .attr("stroke-width", d => {{
+                                switch(d.type) {{
+                                    case 'root': return 5;
+                                    case 'name': return 4;
+                                    case 'keyword': return 3;
+                                    default: return 3;
+                                }}
+                            }});
+                    }}
+                }});
                 
                 // 노드 텍스트 업데이트
                 nodeUpdate.select(".node-text")
+                    .filter(d => d.type !== "summary")   // ✅ summary 제외
                     .text(d => {{
                         const maxLength = Math.max(5, Math.floor(getNodeRadius(d.cnt, d.type) / 3));
                         return d.name.length > maxLength ? 
                                d.name.substring(0, maxLength) + '...' : 
                                d.name;
                     }})
-                    .attr("font-size", d => Math.max(9, getNodeRadius(d.cnt, d.type) / 2.2));
+                    .attr("font-size", d => Math.max(9, getNodeRadius(d.cnt, d.type) / 2.2) + "px");
                 
                 // 노드 카운트 업데이트
                 nodeUpdate.select(".node-count")
+                    .filter(d => d.type !== "summary")   // ✅ summary 제외
                     .text(d => d.cnt ? `${{d.cnt}}명` : '')
                     .attr("font-size", "10px");
                 
@@ -842,27 +929,41 @@ def create_tree_force_hybrid_mindmap_4level(tree_data):
                     }})
                     .on("mouseover", function(event, d) {{
                         showTooltip(event, d);
-                        d3.select(this).select(".node-circle").transition().duration(200)
-                            .attr("stroke-width", d => {{
-                                switch(d.type) {{
-                                    case 'root': return 7;
-                                    case 'name': return 6;
-                                    case 'keyword': return 5;
-                                    default: return 5;
-                                }}
-                            }});
+                        if (d.type === 'summary') {{
+                            // Summary 노드 (직사각형) 호버 효과
+                            d3.select(this).select(".node-rect").transition().duration(200)
+                                .attr("stroke-width", 4);
+                        }} else {{
+                            // 원형 노드 호버 효과
+                            d3.select(this).select(".node-circle").transition().duration(200)
+                                .attr("stroke-width", d => {{
+                                    switch(d.type) {{
+                                        case 'root': return 7;
+                                        case 'name': return 6;
+                                        case 'keyword': return 5;
+                                        default: return 5;
+                                    }}
+                                }});
+                        }}
                     }})
                     .on("mouseout", function(event, d) {{
                         hideTooltip();
-                        d3.select(this).select(".node-circle").transition().duration(200)
-                            .attr("stroke-width", d => {{
-                                switch(d.type) {{
-                                    case 'root': return 5;
-                                    case 'name': return 4;
-                                    case 'keyword': return 3;
-                                    default: return 3;
-                                }}
-                            }});
+                        if (d.type === 'summary') {{
+                            // Summary 노드 (직사각형) 호버 해제
+                            d3.select(this).select(".node-rect").transition().duration(200)
+                                .attr("stroke-width", 2);
+                        }} else {{
+                            // 원형 노드 호버 해제
+                            d3.select(this).select(".node-circle").transition().duration(200)
+                                .attr("stroke-width", d => {{
+                                    switch(d.type) {{
+                                        case 'root': return 5;
+                                        case 'name': return 4;
+                                        case 'keyword': return 3;
+                                        default: return 3;
+                                    }}
+                                }});
+                        }}
                     }});
                 
                 // 시뮬레이션 틱 이벤트
@@ -1043,7 +1144,7 @@ def main():
         layout="wide"
     )
 
-    st.title("🧠 4단계 하이브리드 마인드맵 + RAG 챗봇")
+    st.title("🧠 키워드 마인드맵 + RAG 챗봇")
     st.markdown("---")
 
     # 파일 업로드
@@ -1075,25 +1176,16 @@ def main():
                 tree_data = create_tree_data_from_csv_4level(df)
 
                 with left_col:
-                    st.subheader("🗺️ 4단계 하이브리드 마인드맵")
-                    st.markdown("*메인 → 상위개념(name) → 키워드 → 요약*")
+                    st.subheader("🗺️ 키워드 마인드맵")
+                    st.markdown("*메인 → 상위개념 → 키워드 → 요약*")
 
                     # 4단계 하이브리드 마인드맵 시각화
                     html_code = create_tree_force_hybrid_mindmap_4level(tree_data)
                     components.html(html_code, height=600, scrolling=False)
 
-                    with st.expander("💡 4단계 하이브리드 기능"):
-                        st.markdown("""
-                        **🌳 4단계 트리 구조**: 메인 → 상위개념(name) → 키워드 → 요약
-                        **⚡ Force Simulation**: 노드 겹침 완전 방지 & 부드러운 애니메이션  
-                        **🎮 상호작용**: 드래그로 자유 이동, 줌 인/아웃, 클릭으로 펼치기/접기
-                        **🔄 복원 기능**: 언제든 "트리 복원" 버튼으로 원래 형태로 복귀
-                        **🎯 물리엔진 토글**: 필요에 따라 물리엔진 끄고 켜기 가능
-                        """)
-
             else:
                 with left_col:
-                    st.info("4단계 마인드맵 생성을 위해서는 user_id, total_cl, name, keywords, summary 컬럼이 필요합니다.")
+                    st.info(" 마인드맵 생성을 위해서는 user_id, total_cl, name, keywords, summary 컬럼이 필요합니다.")
 
             with right_col:
                 st.subheader("📊 데이터 분석")
