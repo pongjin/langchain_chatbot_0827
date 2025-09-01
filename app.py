@@ -1144,12 +1144,14 @@ def main():
         layout="wide"
     )
 
-    st.title("🧠 키워드 마인드맵 + RAG 챗봇")
+    st.title("🧠 키워드 마인드맵 + RAG 질의응답")
+    st.subheader("설문 응답을 의미 단위로 분리한뒤(semantic chuncking) 키워드를 도출하고, 이를 활용하여 분석을 진행합니다.")
+    st.text("예시) 유저A: '그래픽은 좋지만 사운드는 별로입니다' -> 유저A는 '그래픽은 좋다' 와 '사운드는 별로다' 두 가지 주제를 얘기하고 있습니다. LLM을 활용하여 이를 의미 단위로 분리(이하 '청크')하는 전처리를 진행하였습니다.")
     st.markdown("---")
 
     # 파일 업로드
     uploaded_file = st.file_uploader(
-        "CSV 파일을 업로드하세요", 
+        "CSV 파일을 업로드하세요. 새롭게 파일을 넣는 경우, 좌측 상단 새로고침 버튼을 누르세요", 
         type=['csv'],
         help="user_id, total_cl, name, keywords, summary, SPLITTED 컬럼 필요"
     )
@@ -1168,6 +1170,21 @@ def main():
                 st.info("user_id, total_cl, name, keywords, summary, SPLITTED")
                 st.stop()
 
+            
+            st.subheader("📊 데이터 요약")
+            
+            if has_mindmap_columns:
+                # 기본 정보 메트릭
+                filtered_df = df[df.total_cl != 99]
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("전체 응답 수", df[df.total_cl != 99].user_id.nunique())
+                with col2:
+                    st.metric("분리된 청크 수", len(df))
+                with col3:
+                    st.metric("유효한 청크 수", len(filtered_df))
+
+            
             # 왼쪽/오른쪽 분할 레이아웃
             left_col, right_col = st.columns([1, 1])
 
@@ -1177,32 +1194,16 @@ def main():
 
                 with left_col:
                     st.subheader("🗺️ 키워드 마인드맵")
-                    st.markdown("*메인 → 상위개념 → 키워드 → 요약*")
+                    st.markdown("*메인 → 상위주제 → 키워드 → 요약*")
 
                     # 4단계 하이브리드 마인드맵 시각화
                     html_code = create_tree_force_hybrid_mindmap_4level(tree_data)
                     components.html(html_code, height=600, scrolling=False)
 
-            else:
-                with left_col:
-                    st.info(" 마인드맵 생성을 위해서는 user_id, total_cl, name, keywords, summary 컬럼이 필요합니다.")
-
-            with right_col:
-                st.subheader("📊 데이터 분석")
-
-                if has_mindmap_columns:
-                    # 기본 정보 메트릭
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        st.metric("전체 행수", len(df))
-                    with col2:
-                        filtered_df = df[df.total_cl != 99]
-                        st.metric("유효 응답", len(filtered_df))
-                    with col3:
-                        st.metric("총 응답자수", df[df.total_cl != 99].user_id.nunique())
-
-                    # Summary Table (4단계 구조)
-                    st.subheader("📋 4단계 Summary Table")
+                    filtered_df = df[df.total_cl != 99]
+                    
+                    st.subheader("📋 키워드 별 관련 청크")
+                    st.text("키워드로 분류된 청크들을 확인할 수 있습니다")
                     summary_table = (
                         filtered_df
                         .groupby(['name', 'keywords', 'summary'], as_index=False, dropna=False)
@@ -1212,11 +1213,31 @@ def main():
                         )
                     )
                     st.dataframe(
-                        summary_table.sort_values('cnt', ascending=False), 
+                        summary_table.sort_values(['name','keywords'], ascending=False), 
                         use_container_width=True,
-                        height=200
+                        #height=500
+                    )
+            
+            else:
+                with left_col:
+                    st.info(" 마인드맵 생성을 위해서는 user_id, total_cl, name, keywords, summary 컬럼이 필요합니다.")
+
+            with right_col:
+
+                if has_mindmap_columns:
+                    # Summary Table (4단계 구조)
+                    st.subheader("📋 키워드 미분류 청크")
+                    st.text("키워드로 분류되지 않은 청크들을 확인할 수 있습니다.")
+                    no_filtered_df = df[df.total_cl == 99][["user_id","SPLITTED"]]
+                    st.dataframe(
+                        no_filtered_df.set_index("user_id"),
+                        use_container_width=True,
                     )
 
+                st.subheader("🤖 RAG 질의응답")
+                st.text("청크를 근거로 유저의 질의에 응답하며, 응답에 사용된 청크를 확인할 수 있습니다.(현재 상위 10개만 확인 가능)")
+                st.markdown("RAG 구축 간 시간이 소요됩니다.(약 N분)")
+                
                 file_hash = get_file_hash(uploaded_file)
 
                 # 세션 상태 초기화
