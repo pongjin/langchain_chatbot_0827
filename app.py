@@ -1180,9 +1180,9 @@ def main():
                 with col1:
                     st.metric("전체 응답 수", df[df.total_cl != 99].user_id.nunique())
                 with col2:
-                    st.metric("분리된 청크 수", len(df))
+                    st.metric("전체 청크 수", len(df))
                 with col3:
-                    st.metric("유효한 청크 수", len(filtered_df))
+                    st.metric("키워드 분류 청크 수", len(filtered_df))
 
             
             # 왼쪽/오른쪽 분할 레이아웃
@@ -1203,7 +1203,7 @@ def main():
                     filtered_df = df[df.total_cl != 99]
                     
                     st.subheader("📋 키워드 별 관련 청크")
-                    st.text("키워드로 분류된 청크들을 확인할 수 있습니다")
+                    st.text("키워드로 분류된 청크들을 확인할 수 있습니다.(테이블 우측 상단 다운로드 가능)")
                     summary_table = (
                         filtered_df
                         .groupby(['name', 'keywords', 'summary'], as_index=False, dropna=False)
@@ -1227,7 +1227,7 @@ def main():
                 if has_mindmap_columns:
                     # Summary Table (4단계 구조)
                     st.subheader("📋 키워드 미분류 청크")
-                    st.text("키워드로 분류되지 않은 청크들을 확인할 수 있습니다.")
+                    st.text("키워드로 분류되지 않은 청크들을 확인할 수 있습니다.(테이블 우측 상단 다운로드 가능)")
                     no_filtered_df = df[df.total_cl == 99][["user_id","SPLITTED"]]
                     st.dataframe(
                         no_filtered_df.set_index("user_id"),
