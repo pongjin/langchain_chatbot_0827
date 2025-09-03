@@ -120,9 +120,14 @@ class ScoredRetriever(Runnable):
         docs_and_scores = self.vectorstore.similarity_search_with_relevance_scores(
             query, k=self.k
         )
+
+        filtered_docs = []
         for doc, score in docs_and_scores:
-            doc.metadata["score"] = score  # ✅ 점수 추가
-        return [doc for doc, _ in docs_and_scores]
+            doc.metadata["score"] = score
+            if score >= self.score_threshold:   # ✅ 0.1 이상만 남김
+                filtered_docs.append(doc)
+
+        return filtered_docs
 
 # RAG 체인 초기화
 @st.cache_resource
@@ -130,7 +135,7 @@ def initialize_components(file_path: str, selected_model: str, cache_buster: str
     vectorstore = create_vector_store(file_path, cache_buster)
 
     # 기존 retriever 대신 ScoredRetriever 사용
-    retriever = ScoredRetriever(vectorstore, k=10)
+    retriever = ScoredRetriever(vectorstore, k=10, score_threshold=0.1)
 
     contextualize_q_prompt = ChatPromptTemplate.from_messages([
         ("system", "이전 대화 내용을 반영해 현재 질문을 독립형 질문으로 바꿔줘."),
@@ -1337,10 +1342,7 @@ def main():
                                         score = doc.metadata.get('score', None)  # ✅ 유사도 점수 가져오기
                                         
                                         source_filename = os.path.basename(source)
-                                        st.markdown(f"👤 {source_filename}")
-
-                                        if score is not None:
-                                            st.markdown(f"📊 유사도: `{score:.2f}`")  # 소수점 4자리까지 표시
+                                        st.markdown(f"👤 {source_filename} 📊 유사도: {score:.2f}")
                                         #st.markdown(doc.page_content)
                                         st.html(raw_ans)
 
