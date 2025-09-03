@@ -109,14 +109,14 @@ def create_vector_store(file_path: str, cache_buster: str):
     return vectorstore
 
 from langchain.schema import Document
+from langchain_core.runnables import Runnable
 
-# 점수 정보를 metadata에 추가하는 커스텀 Retriever
-class ScoredRetriever:
+class ScoredRetriever(Runnable):
     def __init__(self, vectorstore, k=10):
         self.vectorstore = vectorstore
         self.k = k
 
-    def invoke(self, query):
+    def invoke(self, query, config=None):
         docs_and_scores = self.vectorstore.similarity_search_with_relevance_scores(
             query, k=self.k
         )
