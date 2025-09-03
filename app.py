@@ -112,9 +112,10 @@ from langchain.schema import Document
 from langchain_core.runnables import Runnable
 
 class ScoredRetriever(Runnable):
-    def __init__(self, vectorstore, k=10):
+    def __init__(self, vectorstore, k=10, score_threshold=0.1):
         self.vectorstore = vectorstore
         self.k = k
+        self.score_threshold = score_threshold  # ✅ 임계값 추가
 
     def invoke(self, query, config=None):
         docs_and_scores = self.vectorstore.similarity_search_with_relevance_scores(
