@@ -1337,14 +1337,19 @@ def main():
 
                             if "관련된 내용이 없습니다" not in answer and response.get("context"):
                                 with st.expander("참고 문서 확인"):
+                                    seen = set()
                                     for doc in response['context']:
+                                        key = (doc.metadata.get("source"), doc.page_content)
+                                        if key in seen:
+                                            continue
+                                        seen.add(key)
+                                    
                                         source = doc.metadata.get('source', '알 수 없음')
                                         raw_ans = doc.metadata.get('ans', '알 수 없음')
-                                        score = doc.metadata.get('score', None)  # ✅ 유사도 점수 가져오기
-                                        
+                                        score = doc.metadata.get('score', None)
                                         source_filename = os.path.basename(source)
+                                    
                                         st.markdown(f"👤 {source_filename} 📊 유사도: {score:.2f}")
-                                        #st.markdown(doc.page_content)
                                         st.html(raw_ans)
 
         except Exception as e:
