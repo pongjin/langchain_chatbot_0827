@@ -112,7 +112,7 @@ def create_vector_store(file_path: str, cache_buster: str):
 @st.cache_resource
 def initialize_components(file_path: str, selected_model: str, cache_buster: str):
     vectorstore = create_vector_store(file_path, cache_buster)
-    retriever = vectorstore.as_retriever( search_type="similarity",search_kwargs={"k": 10} )
+    retriever = vectorstore.as_retriever( search_type="similarity",search_kwargs={"k": 10, "score_threshold": 0.3} )
 
     contextualize_q_prompt = ChatPromptTemplate.from_messages([
         ("system", "이전 대화 내용을 반영해 현재 질문을 독립형 질문으로 바꿔줘."),
