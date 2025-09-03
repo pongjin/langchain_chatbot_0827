@@ -1316,8 +1316,13 @@ def main():
                                     for doc in response['context']:
                                         source = doc.metadata.get('source', '알 수 없음')
                                         raw_ans = doc.metadata.get('ans', '알 수 없음')
+                                        score = doc.metadata.get('score', None)  # ✅ 유사도 점수 가져오기
+                                        
                                         source_filename = os.path.basename(source)
                                         st.markdown(f"👤 {source_filename}")
+
+                                        if score is not None:
+                                            st.markdown(f"📊 유사도: `{score:.2f}`")  # 소수점 4자리까지 표시
                                         #st.markdown(doc.page_content)
                                         st.html(raw_ans)
 
