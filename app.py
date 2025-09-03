@@ -108,11 +108,29 @@ def create_vector_store(file_path: str, cache_buster: str):
     )
     return vectorstore
 
+from langchain.schema import Document
+
+# 점수 정보를 metadata에 추가하는 커스텀 Retriever
+class ScoredRetriever:
+    def __init__(self, vectorstore, k=10):
+        self.vectorstore = vectorstore
+        self.k = k
+
+    def invoke(self, query):
+        docs_and_scores = self.vectorstore.similarity_search_with_relevance_scores(
+            query, k=self.k
+        )
+        for doc, score in docs_and_scores:
+            doc.metadata["score"] = score  # ✅ 점수 추가
+        return [doc for doc, _ in docs_and_scores]
+
 # RAG 체인 초기화
 @st.cache_resource
 def initialize_components(file_path: str, selected_model: str, cache_buster: str):
     vectorstore = create_vector_store(file_path, cache_buster)
-    retriever = vectorstore.as_retriever( search_type="similarity",search_kwargs={"k": 10} )
+
+    # 기존 retriever 대신 ScoredRetriever 사용
+    retriever = ScoredRetriever(vectorstore, k=10)
 
     contextualize_q_prompt = ChatPromptTemplate.from_messages([
         ("system", "이전 대화 내용을 반영해 현재 질문을 독립형 질문으로 바꿔줘."),
